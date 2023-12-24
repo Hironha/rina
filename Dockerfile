@@ -1,8 +1,8 @@
 FROM rust:1.74.1 as builder
 
-RUN apt update && \
-    apt install libssl-dev \
-        libopus-dev -y
+RUN apt-get update && \
+    apt-get install -y libssl-dev libopus-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -18,10 +18,9 @@ WORKDIR /app
 COPY --from=builder /app/target/x86_64-unknown-linux-gnu/release/rina ./
 COPY --from=builder /app/.env ./
 
-RUN apt update && \
-    apt install libssl-dev \
-        libopus-dev \
-        ffmpeg \
-        youtube-dl -y
+RUN apt-get update && \
+    apt-get install -y libssl-dev libopus-dev ffmpeg python3 python3-pip && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip3 install --upgrade --break-system-packages yt-dlp
 
 CMD [ "/app/rina" ]
