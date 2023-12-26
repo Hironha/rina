@@ -4,7 +4,7 @@ Since Nina implementation in NodeJs stopped working, I've decided to start a new
 
 ## Quick Start
 
-I'm going to configure a docker-compose to easily build/run the application in the future, but for now, you can do it manually following the instructions bellow. 
+I'm going to configure a docker-compose to easily build/run the application in the future, but for now, you can do it manually following the instructions bellow.
 
 ### Build Rina
 
@@ -22,9 +22,12 @@ After building the image, all you gotta do is start the container with the follo
 docker run --name rina -d rina-image
 ```
 
-### Todo
+### Roadmap to stable release
 
-[] add `!help` command
-[] support playlist
-[] inform track end with track's title
-[] investigate possible memory leak 
+- [ ] add `!help` command
+- [ ] support playlist
+- [ ] support track metadata in commands
+  - [x] add track title in track end message
+  - [x] add track title in enqueued track message 
+  - [ ] add track title in skipped track message
+- [ ] investigate possible memory leak
