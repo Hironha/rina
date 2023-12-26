@@ -14,15 +14,15 @@ RUN cargo build --target x86_64-unknown-linux-gnu --release
 
 FROM debian:12.4
 
-WORKDIR /app
-
-COPY --from=builder /app/target/x86_64-unknown-linux-gnu/release/rina ./
-COPY --from=builder /app/.env ./
-
 # install thirdy party dependencies needed to run songbird
 RUN apt-get update && \
     apt-get install -y libssl-dev libopus-dev ffmpeg python3 python3-pip && \
     rm -rf /var/lib/apt/lists/* && \
     pip3 install --upgrade --break-system-packages yt-dlp
+
+WORKDIR /app
+
+COPY --from=builder /app/target/x86_64-unknown-linux-gnu/release/rina ./
+COPY --from=builder /app/.env ./
 
 CMD [ "/app/rina" ]
