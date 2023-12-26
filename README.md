@@ -21,3 +21,10 @@ After building the image, all you gotta do is start the container with the follo
 ```console
 docker run --name rina -d rina-image
 ```
+
+### Todo
+
+[] add `!help` command
+[] support playlist
+[] inform track end with track's title
+[] investigate possible memory leak 
