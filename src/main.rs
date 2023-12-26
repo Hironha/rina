@@ -15,8 +15,8 @@ use serenity::model::prelude::ChannelId;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
 use serenity::Result as SerenityResult;
 use songbird::input::YoutubeDl;
-use songbird::TrackEvent;
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit};
+use songbird::{Songbird, TrackEvent};
 
 struct HttpKey;
 
@@ -126,16 +126,18 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     let message = format!("Joined {}", connect_to.mention());
     check_msg(msg.channel_id.say(&ctx.http, message).await);
 
-    let track_end_event = TrackEndNotifier {
-        chan_id: msg.channel_id,
-        http: ctx.http.clone(),
-    };
-
     let mut voice_handler = voice_lock.lock().await;
     if let Err(e) = voice_handler.deafen(true).await {
         let message = format!("Failed: {:?}", e);
         check_msg(msg.channel_id.say(&ctx.http, message).await);
+        return Ok(());
     }
+
+    let track_end_event = TrackEndNotifier {
+        manager,
+        chan_id: msg.channel_id,
+        http: ctx.http.clone(),
+    };
 
     voice_handler.add_global_event(Event::Track(TrackEvent::End), track_end_event);
 
@@ -145,15 +147,28 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 struct TrackEndNotifier {
     chan_id: ChannelId,
     http: Arc<Http>,
+    manager: Arc<Songbird>,
 }
 
 #[async_trait]
 impl VoiceEventHandler for TrackEndNotifier {
     async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
-        if let EventContext::Track(track_list) = ctx {
-            let message = format!("Tracks ended: {}.", track_list.len());
-            check_msg(self.chan_id.say(&self.http, message).await);
-        }
+        match ctx {
+            EventContext::DriverDisconnect(data) => {
+                if let Err(err) = self.manager.remove(data.guild_id).await {
+                    tracing::error!("Failed removing voice handler on disconnect: {err:?}");
+                }
+            }
+            EventContext::Track(track_list) => {
+                if track_list.get(0).is_some() {
+                    let message = "Track ended";
+                    check_msg(self.chan_id.say(&self.http, message).await);
+                } else {
+                    tracing::error!("Track end event dispatched but there is no track attached");
+                }
+            }
+            _ => {}
+        };
 
         None
     }
