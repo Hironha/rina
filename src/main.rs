@@ -38,7 +38,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(join, leave, mute, play, queue, skip, stop, ping, unmute)]
+#[commands(join, leave, mute, play, skip, stop, ping, unmute)]
 struct General;
 
 #[tokio::main]
@@ -256,49 +256,8 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     };
 
     let src = YoutubeDl::new(get_http_client(ctx).await, url);
-    voice_lock.lock().await.play_input(src.into());
-
-    check_msg(msg.channel_id.say(&ctx.http, "Playing song").await);
-
-    Ok(())
-}
-
-#[command]
-#[only_in(guilds)]
-async fn queue(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
-    let Ok(url) = args.single::<String>() else {
-        let message = "Must provide a URL to a video or audio";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
-        return Ok(());
-    };
-
-    if !url.starts_with("http") {
-        let message = "Must provide a valid URL";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
-        return Ok(());
-    }
-
-    let manager = songbird::get(ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialization.")
-        .clone();
-
-    let Some(voice_lock) = manager.get(guild_id) else {
-        let message = "Not in a voice channel to play in";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
-        return Ok(());
-    };
-
-    let mut voice_handler = voice_lock.lock().await;
-    let src = YoutubeDl::new(get_http_client(ctx).await, url);
-    voice_handler.enqueue_input(src.into()).await;
-
-    let message = format!(
-        "Added song to queue: position {}",
-        voice_handler.queue().len()
-    );
-    check_msg(msg.channel_id.say(&ctx.http, message).await);
+    voice_lock.lock().await.enqueue_input(src.into()).await;
+    check_msg(msg.channel_id.say(&ctx.http, "Added song to queue").await);
 
     Ok(())
 }
