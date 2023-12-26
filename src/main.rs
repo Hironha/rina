@@ -133,13 +133,13 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     }
 
-    let track_end_event = TrackEndNotifier {
+    let track_end_handler = TrackEndNotifier {
         manager,
         chan_id: msg.channel_id,
         http: ctx.http.clone(),
     };
 
-    voice_handler.add_global_event(Event::Track(TrackEvent::End), track_end_event);
+    voice_handler.add_global_event(Event::Track(TrackEvent::End), track_end_handler);
 
     Ok(())
 }
@@ -270,6 +270,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         return Ok(());
     };
 
+    
     let src = YoutubeDl::new(get_http_client(ctx).await, url);
     voice_lock.lock().await.enqueue_input(src.into()).await;
     check_msg(msg.channel_id.say(&ctx.http, "Added song to queue").await);
