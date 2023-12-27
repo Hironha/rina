@@ -98,7 +98,7 @@ async fn get_http_client(ctx: &Context) -> HttpClient {
 #[command]
 #[only_in(guilds)]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult {
-    let (guild_id, channel_id) = {
+    let (guild_id, author_channel_id) = {
         let guild = msg.guild(&ctx.cache).unwrap();
         let channel_id = guild
             .voice_states
@@ -108,7 +108,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         (guild.id, channel_id)
     };
 
-    let Some(connect_to) = channel_id else {
+    let Some(connect_to) = author_channel_id else {
         check_msg(msg.reply(ctx, "Not in a voice channel").await);
         return Ok(());
     };
@@ -117,6 +117,15 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         .await
         .expect("Songbird Voice client placed in at initialization.")
         .clone();
+
+    if manager.get(guild_id).is_some() {
+        let message = author_channel_id
+            .map(|chan| format!("Already in use at {}", chan.mention()))
+            .unwrap_or_else(|| String::from("Already in use at another voice channel"));
+
+        check_msg(msg.reply(ctx, message).await);
+        return Ok(());
+    }
 
     let Ok(voice_lock) = manager.join(guild_id, connect_to).await else {
         let message = format!("Could not join the voice channel {}", connect_to.mention());
@@ -330,7 +339,10 @@ async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         return Ok(());
     }
 
-    let message = format!("Track skipped. Remaining {} track(s) in queue", queue.len() - 1);
+    let message = format!(
+        "Track skipped. Remaining {} track(s) in queue",
+        queue.len() - 1
+    );
     check_msg(msg.channel_id.say(&ctx.http, message).await);
 
     Ok(())
