@@ -168,7 +168,10 @@ impl VoiceEventHandler for TrackEndHandler {
 #[only_in(guilds)]
 async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
     let (guild_id, author_channel_id) = {
-        let guild = msg.guild(&ctx.cache).unwrap();
+        let guild = msg
+            .guild(&ctx.cache)
+            .expect("Could not get guild from serenity context cache");
+
         let channel_id = guild
             .voice_states
             .get(&msg.author.id)
@@ -187,12 +190,8 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     };
 
-    let voice_handler = voice_lock.lock().await;
-    let channels_eq = author_channel_id
-        .map(songbird::id::ChannelId::from)
-        .eq(&voice_handler.current_channel());
-
-    if !channels_eq {
+    let voice_channel = voice_lock.lock().await.current_channel();
+    if author_channel_id.map(songbird::id::ChannelId::from) != voice_channel {
         check_msg(msg.reply(ctx, "Not in same voice channel").await);
         return Ok(());
     }
@@ -205,7 +204,7 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
     }
 
     let message = author_channel_id
-        .map(|channel| format!("left voice channel {}", channel.mention()))
+        .map(|channel| format!("Left voice channel {}", channel.mention()))
         .unwrap_or_else(|| String::from("Left voice channel"));
 
     check_msg(msg.channel_id.say(&ctx.http, message).await);
@@ -259,7 +258,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let manager = songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialization.")
+        .expect("Songbird Voice client placed in at initialization")
         .clone();
 
     let voice_lock = if let Some(lock) = manager.get(guild_id) {
@@ -315,7 +314,7 @@ async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 
     let manager = songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialization.")
+        .expect("Songbird Voice client placed in at initialization")
         .clone();
 
     let Some(voice_lock) = manager.get(guild_id) else {
@@ -331,7 +330,7 @@ async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         return Ok(());
     }
 
-    let message = format!("Track skipped. Remaining {} in queue.", queue.len() - 1);
+    let message = format!("Track skipped. Remaining {} track(s) in queue", queue.len() - 1);
     check_msg(msg.channel_id.say(&ctx.http, message).await);
 
     Ok(())
