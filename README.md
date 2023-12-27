@@ -24,10 +24,10 @@ docker run --name rina -d rina-image
 
 ### Roadmap to stable release
 
-- [ ] add `!help` command
+- [x] add `!help` command
 - [ ] support playlist
 - [ ] support track metadata in commands
   - [x] add track title in track end message
   - [x] add track title in enqueued track message 
-  - [ ] add track title in skipped track message
+  - [x] add track title in skipped track message
 - [ ] investigate possible memory leak
