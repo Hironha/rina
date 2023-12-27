@@ -13,6 +13,7 @@ use serenity::model::application::Command;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
+use serenity::utils::MessageBuilder;
 use serenity::Result as SerenityResult;
 use songbird::input::{AuxMetadata, Input, YoutubeDl};
 use songbird::TrackEvent;
@@ -38,7 +39,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(join, leave, mute, play, skip, stop, unmute)]
+#[commands(help, join, leave, mute, play, skip, stop, unmute)]
 struct General;
 
 #[tokio::main]
@@ -166,7 +167,15 @@ impl VoiceEventHandler for TrackEndHandler {
 #[command]
 #[only_in(guilds)]
 async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild(&ctx.cache).unwrap().id;
+    let (guild_id, author_channel_id) = {
+        let guild = msg.guild(&ctx.cache).unwrap();
+        let channel_id = guild
+            .voice_states
+            .get(&msg.author.id)
+            .and_then(|voice_state| voice_state.channel_id);
+
+        (guild.id, channel_id)
+    };
 
     let manager = songbird::get(ctx)
         .await
@@ -178,14 +187,28 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     };
 
-    voice_lock.lock().await.remove_all_global_events();
+    let voice_handler = voice_lock.lock().await;
+    let channels_eq = author_channel_id
+        .map(songbird::id::ChannelId::from)
+        .eq(&voice_handler.current_channel());
+
+    if !channels_eq {
+        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        return Ok(());
+    }
 
     if let Err(e) = manager.remove(guild_id).await {
-        let message = format!("Failed: {:?}", e);
+        tracing::error!("Failed leaving voice channel: {e:?}");
+        let message = "Could not leave voice channel";
         check_msg(msg.channel_id.say(&ctx.http, message).await);
-    } else {
-        check_msg(msg.channel_id.say(&ctx.http, "Left voice channel").await);
+        return Ok(());
     }
+
+    let message = author_channel_id
+        .map(|channel| format!("left voice channel {}", channel.mention()))
+        .unwrap_or_else(|| String::from("Left voice channel"));
+
+    check_msg(msg.channel_id.say(&ctx.http, message).await);
 
     Ok(())
 }
@@ -276,11 +299,9 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .add_event(Event::Track(TrackEvent::End), track_end_handler)
         .expect("Failed adding track end event");
 
-    let message = if let Some(title) = track_title {
-        format!("Track {title} added to queue")
-    } else {
-        String::from("Track added to queue")
-    };
+    let message = track_title
+        .map(|title| format!("Track {title} added to queue"))
+        .unwrap_or_else(|| String::from("Track added to queue"));
 
     check_msg(msg.channel_id.say(&ctx.http, message).await);
 
@@ -310,7 +331,7 @@ async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         return Ok(());
     }
 
-    let message = format!("Song skipped: {} in queue.", queue.len());
+    let message = format!("Track skipped. Remaining {} in queue.", queue.len() - 1);
     check_msg(msg.channel_id.say(&ctx.http, message).await);
 
     Ok(())
@@ -361,6 +382,34 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
     } else {
         check_msg(msg.channel_id.say(&ctx.http, "Unmuted").await);
     }
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+async fn help(ctx: &Context, msg: &Message) -> CommandResult {
+    // TODO: improve message implementation, maybe using `include_str!` macro
+    let message = MessageBuilder::new()
+        .push_bold_line("!help")
+        .push_line("Explains all available commands\n")
+        .push_bold_line("!join")
+        .push_line("Calls **Rina** to join your current voice channel\n")
+        .push_bold_line("!leave")
+        .push_line("Removes **Rina** from current voice channel and clears track queue\n")
+        .push_bold_line("!mute")
+        .push_line("Mutes **Rina**. Beware, if playing a track, no sound will come out\n")
+        .push_bold_line("!play")
+        .push_line("Must provide an **url** as argument. If **Rina** is not in a voice channel yet, it's going to join your current voice channel and enqueue the provided track in **url**. Automatically searching track by name is not implemented yet\n")
+        .push_bold_line("!skip")
+        .push_line("Skips current track\n")
+        .push_bold_line("!stop")
+        .push_line("Stops playing tracks, also clears all tracks in queue\n")
+        .push_bold_line("!unmute")
+        .push_line("Unmutes **Rina**")
+        .build();
+
+    check_msg(msg.reply(ctx, message).await);
 
     Ok(())
 }
