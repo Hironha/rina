@@ -26,7 +26,7 @@ docker run --name rina -d rina-image
 
 - [x] add `!help` command
 - [ ] support playlist
-- [ ] support track metadata in commands
+- [x] support track metadata in commands
   - [x] add track title in track end message
   - [x] add track title in enqueued track message 
   - [x] add track title in skipped track message
