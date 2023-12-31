@@ -16,7 +16,7 @@ FROM debian:12.4
 
 # install thirdy party dependencies needed to run songbird
 RUN apt-get update && \
-    apt-get install -y libssl-dev libopus-dev ffmpeg python3 python3-pip && \
+    apt-get install -y libssl-dev libopus-dev python3 python3-pip && \
     rm -rf /var/lib/apt/lists/* && \
     pip3 install --upgrade --break-system-packages yt-dlp
 
