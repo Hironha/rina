@@ -83,8 +83,6 @@ async fn main() {
             .map_err(|why| tracing::error!("Client ended: {:?}", why))
             .expect("Failed starting serenity client");
     });
-
-    tracing::info!("Received Ctrl-C, shutting down.");
 }
 
 async fn get_http_client(ctx: &Context) -> HttpClient {
