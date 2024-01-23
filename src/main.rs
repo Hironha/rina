@@ -13,11 +13,12 @@ use serenity::model::application::Command;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
-use serenity::utils::MessageBuilder;
 use serenity::Result as SerenityResult;
 use songbird::input::{AuxMetadata, Input, YoutubeDl};
 use songbird::TrackEvent;
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit};
+
+const HELP_MESSAGE: &str = include_str!("help.md");
 
 struct HttpKey;
 
@@ -51,8 +52,8 @@ async fn main() {
         .compact()
         .init();
 
-    if dotenvy::dotenv().is_err() {
-        tracing::error!("Failed loading .env configuration")
+    if let Err(err) = dotenvy::dotenv() {
+        tracing::error!("Failed loading .env configuration: {err}")
     }
 
     let token = env::var("DISCORD_TOKEN").expect("Expected DISCORD_TOKEN environment variable");
@@ -399,27 +400,7 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 async fn help(ctx: &Context, msg: &Message) -> CommandResult {
-    // TODO: improve message implementation, maybe using `include_str!` macro
-    let message = MessageBuilder::new()
-        .push_bold_line("!help")
-        .push_line("Explains all available commands\n")
-        .push_bold_line("!join")
-        .push_line("Calls **Rina** to join your current voice channel\n")
-        .push_bold_line("!leave")
-        .push_line("Removes **Rina** from current voice channel and clears track queue\n")
-        .push_bold_line("!mute")
-        .push_line("Mutes **Rina**. Beware, if playing a track, no sound will come out\n")
-        .push_bold_line("!play")
-        .push_line("Must provide an **url** as argument. If **Rina** is not in a voice channel yet, it's going to join your current voice channel and enqueue the provided track in **url**. Automatically searching track by name is not implemented yet\n")
-        .push_bold_line("!skip")
-        .push_line("Skips current track\n")
-        .push_bold_line("!stop")
-        .push_line("Stops playing tracks, also clears all tracks in queue\n")
-        .push_bold_line("!unmute")
-        .push_line("Unmutes **Rina**")
-        .build();
-
-    check_msg(msg.reply(ctx, message).await);
+    check_msg(msg.reply(ctx, HELP_MESSAGE).await);
 
     Ok(())
 }
