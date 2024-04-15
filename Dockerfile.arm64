@@ -1,0 +1,28 @@
+FROM rust:1.75 as builder
+
+# install thirdy party dependencies needed at compile time
+RUN apt-get update && \
+    apt-get install -y libssl-dev libopus-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY . .
+
+# build in release mode
+RUN cargo build --target aarch64-unknown-linux-gnu --release
+
+FROM arm64v8/debian:12.5
+
+# install thirdy party dependencies needed to run songbird
+RUN apt-get update && \
+    apt-get install -y libssl-dev libopus-dev python3 python3-pip && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip3 install --upgrade --break-system-packages yt-dlp
+
+WORKDIR /app
+
+COPY --from=builder /app/target/aarch64-unknown-linux-gnu/release/rina ./
+COPY --from=builder /app/.env ./
+
+CMD [ "/app/rina" ]
