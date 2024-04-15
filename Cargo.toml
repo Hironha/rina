@@ -5,7 +5,7 @@ edition = "2021"
 
 [profile.release]
 # better link optimization, but slower builds
-lto = true
+lto = "thin"
 
 [dependencies]
 dotenvy = "0.15"
