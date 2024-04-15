@@ -74,14 +74,14 @@ async fn main() {
     client
         .start()
         .await
-        .map_err(|why| tracing::error!("Client ended: {:?}", why))
+        .map_err(|err| tracing::error!("Client ended: {:?}", err))
         .expect("Failed starting serenity client");
 
     tokio::spawn(async move {
         client
             .start()
             .await
-            .map_err(|why| tracing::error!("Client ended: {:?}", why))
+            .map_err(|err| tracing::error!("Client ended: {:?}", err))
             .expect("Failed starting serenity client");
     });
 }
@@ -406,7 +406,7 @@ async fn help(ctx: &Context, msg: &Message) -> CommandResult {
 }
 
 fn check_msg(result: SerenityResult<Message>) {
-    if let Err(why) = result {
-        tracing::error!("Error sending message: {:?}", why);
+    if let Err(err) = result {
+        tracing::error!("Error sending message: {:?}", err);
     }
 }
