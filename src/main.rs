@@ -74,14 +74,14 @@ async fn main() {
     client
         .start()
         .await
-        .map_err(|err| tracing::error!("Client ended: {:?}", err))
+        .inspect_err(|err| tracing::error!("Client ended: {:?}", err))
         .expect("Failed starting serenity client");
 
     tokio::spawn(async move {
         client
             .start()
             .await
-            .map_err(|err| tracing::error!("Client ended: {:?}", err))
+            .inspect_err(|err| tracing::error!("Client ended: {:?}", err))
             .expect("Failed starting serenity client");
     });
 }
