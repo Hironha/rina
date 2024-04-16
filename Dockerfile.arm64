@@ -1,4 +1,4 @@
-FROM rust:1.75 as builder
+FROM rust:1.77.2 as builder
 
 # install thirdy party dependencies needed at compile time
 RUN apt-get update && \
