@@ -52,10 +52,6 @@ async fn main() {
         .compact()
         .init();
 
-    if let Err(err) = dotenvy::dotenv() {
-        tracing::error!("Failed loading .env configuration: {err}")
-    }
-
     let token = env::var("DISCORD_TOKEN").expect("Expected DISCORD_TOKEN environment variable");
 
     let framework = StandardFramework::new().group(&GENERAL_GROUP);
@@ -74,16 +70,7 @@ async fn main() {
     client
         .start()
         .await
-        .inspect_err(|err| tracing::error!("Client ended: {:?}", err))
         .expect("Failed starting serenity client");
-
-    tokio::spawn(async move {
-        client
-            .start()
-            .await
-            .inspect_err(|err| tracing::error!("Client ended: {:?}", err))
-            .expect("Failed starting serenity client");
-    });
 }
 
 async fn get_http_client(ctx: &Context) -> HttpClient {
@@ -99,11 +86,11 @@ async fn get_http_client(ctx: &Context) -> HttpClient {
 #[only_in(guilds)]
 async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     let (guild_id, author_channel_id) = {
-        let guild = msg.guild(&ctx.cache).unwrap();
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
         let channel_id = guild
             .voice_states
             .get(&msg.author.id)
-            .and_then(|voice_state| voice_state.channel_id);
+            .and_then(|vs| vs.channel_id);
 
         (guild.id, channel_id)
     };
@@ -119,27 +106,27 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         .clone();
 
     if manager.get(guild_id).is_some() {
-        let message = author_channel_id
+        let res = author_channel_id
             .map(|chan| format!("Already in use at {}", chan.mention()))
             .unwrap_or_else(|| String::from("Already in use at another voice channel"));
 
-        check_msg(msg.reply(ctx, message).await);
+        check_msg(msg.reply(ctx, res).await);
         return Ok(());
     }
 
     let Ok(voice_lock) = manager.join(guild_id, connect_to).await else {
-        let message = format!("Could not join the voice channel {}", connect_to.mention());
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        let res = format!("Could not join the voice channel {}", connect_to.mention());
+        check_msg(msg.channel_id.say(&ctx.http, res).await);
         return Ok(());
     };
 
-    let message = format!("Joined {}", connect_to.mention());
-    check_msg(msg.channel_id.say(&ctx.http, message).await);
+    let res = format!("Joined {}", connect_to.mention());
+    check_msg(msg.channel_id.say(&ctx.http, res).await);
 
     let mut voice_handler = voice_lock.lock().await;
-    if let Err(e) = voice_handler.deafen(true).await {
-        let message = format!("Failed: {:?}", e);
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+    if let Err(err) = voice_handler.deafen(true).await {
+        let res = format!("Failed: {:?}", err);
+        check_msg(msg.channel_id.say(&ctx.http, res).await);
         return Ok(());
     }
 
@@ -156,17 +143,12 @@ struct TrackEndHandler {
 impl VoiceEventHandler for TrackEndHandler {
     async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
         if let EventContext::Track(..) = ctx {
-            let message = if let Some(title) = &self.track_metadata.title {
-                format!("Track {} ended", title)
-            } else {
-                tracing::error!(
-                    "No track metadata found. Following metadata: {:?}",
-                    self.track_metadata
-                );
-                String::from("Track ended")
+            let res = match &self.track_metadata.title {
+                Some(title) => format!("Track {title} ended"),
+                None => String::from("Track ended"),
             };
 
-            check_msg(self.channel_id.say(&self.http, message).await);
+            check_msg(self.channel_id.say(&self.http, res).await);
         }
 
         None
@@ -177,14 +159,11 @@ impl VoiceEventHandler for TrackEndHandler {
 #[only_in(guilds)]
 async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
     let (guild_id, author_channel_id) = {
-        let guild = msg
-            .guild(&ctx.cache)
-            .expect("Could not get guild from serenity context cache");
-
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
         let channel_id = guild
             .voice_states
             .get(&msg.author.id)
-            .and_then(|voice_state| voice_state.channel_id);
+            .and_then(|vs| vs.channel_id);
 
         (guild.id, channel_id)
     };
@@ -252,18 +231,12 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
-    let Ok(url) = args.single::<String>() else {
-        let message = "Must provide a URL to a video or audio";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+    let guild_id = msg.guild_id.expect("Expected guild_id to be defined");
+    let Ok(music) = args.single::<String>() else {
+        let res = "Must provide a music name ou URL as argument";
+        check_msg(msg.channel_id.say(&ctx.http, res).await);
         return Ok(());
     };
-
-    if !url.starts_with("http") {
-        let message = format!("{url} is not a valid URL");
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
-        return Ok(());
-    }
 
     let manager = songbird::get(ctx)
         .await
@@ -275,13 +248,18 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     } else if join(ctx, msg, args.clone()).await.is_ok() {
         manager
             .get(guild_id)
-            .expect("Voice lock expected after joining voice channel")
+            .expect("Expected voice lock after joining voice channel")
     } else {
         tracing::error!("Failed joining voice channel to play music");
         return Ok(());
     };
 
-    let mut src: Input = YoutubeDl::new(get_http_client(ctx).await, url).into();
+    let mut src: Input = if music.starts_with("http") {
+        YoutubeDl::new(get_http_client(ctx).await, music).into()
+    } else {
+        YoutubeDl::new_search(get_http_client(ctx).await, music).into()
+    };
+
     let metadata = match src.aux_metadata().await {
         Ok(metadata) => metadata,
         Err(err) => {
@@ -307,11 +285,11 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .add_event(Event::Track(TrackEvent::End), track_end_handler)
         .expect("Failed adding track end event");
 
-    let message = track_title
+    let res = track_title
         .map(|title| format!("Track {title} added to queue"))
         .unwrap_or_else(|| String::from("Track added to queue"));
 
-    check_msg(msg.channel_id.say(&ctx.http, message).await);
+    check_msg(msg.channel_id.say(&ctx.http, res).await);
 
     Ok(())
 }
