@@ -25,10 +25,10 @@ docker run -e DISCORD_TOKEN=YOUR_TOKEN --name rina -d rina-image
 ### Roadmap to stable release
 
 - [x] add `!help` command
-- [ ] support playlist
+- [ ] support playlist (perhaps in v0.3)
 - [x] support track search
 - [x] support track metadata in commands
   - [x] add track title in track end message
   - [x] add track title in enqueued track message 
   - [x] add track title in skipped track message
-- [ ] investigate possible memory leak
+- [x] investigate possible memory leak
