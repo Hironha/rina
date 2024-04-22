@@ -14,7 +14,7 @@ use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
 use serenity::Result as SerenityResult;
-use songbird::input::{AuxMetadata, Input, YoutubeDl};
+use songbird::input::{Input, YoutubeDl};
 use songbird::TrackEvent;
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit};
 
@@ -24,6 +24,12 @@ struct HttpKey;
 
 impl TypeMapKey for HttpKey {
     type Value = HttpClient;
+}
+
+struct TrackTitleKey;
+
+impl TypeMapKey for TrackTitleKey {
+    type Value = String;
 }
 
 struct Handler;
@@ -136,19 +142,19 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 struct TrackEndHandler {
     http: Arc<Http>,
     channel_id: ChannelId,
-    track_metadata: AuxMetadata,
 }
 
 #[async_trait]
 impl VoiceEventHandler for TrackEndHandler {
     async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
-        if let EventContext::Track(..) = ctx {
-            let res = match &self.track_metadata.title {
+        if let EventContext::Track([(_, handle)]) = ctx {
+            let typemap_read_lock = handle.typemap().blocking_read();
+            let title = typemap_read_lock.get::<TrackTitleKey>();
+            let message = match title {
                 Some(title) => format!("Track {title} ended"),
                 None => String::from("Track ended"),
             };
-
-            check_msg(self.channel_id.say(&self.http, res).await);
+            check_msg(self.channel_id.say(&self.http, message).await);
         }
 
         None
@@ -270,26 +276,27 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         }
     };
 
-    let track_title = metadata.title.clone();
+    let track_handle = voice_lock.lock().await.enqueue_input(src).await;
+
     let track_end_handler = TrackEndHandler {
         channel_id: msg.channel_id,
         http: ctx.http.clone(),
-        track_metadata: metadata,
     };
+    if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), track_end_handler) {
+        tracing::error!("Failed adding track end event handler: {err}");
+        check_msg(msg.channel_id.say(&ctx.http, "Failed loading track").await);
+        return Ok(());
+    }
 
-    voice_lock
-        .lock()
-        .await
-        .enqueue_input(src)
-        .await
-        .add_event(Event::Track(TrackEvent::End), track_end_handler)
-        .expect("Failed adding track end event");
+    let track_title = metadata
+        .title
+        .unwrap_or_else(|| String::from("Unknown track"));
 
-    let res = track_title
-        .map(|title| format!("Track {title} added to queue"))
-        .unwrap_or_else(|| String::from("Track added to queue"));
+    let message = format!("Track {track_title} added to queue");
+    check_msg(msg.channel_id.say(&ctx.http, message).await);
 
-    check_msg(msg.channel_id.say(&ctx.http, res).await);
+    let mut typemap_write_lock = track_handle.typemap().blocking_write();
+    typemap_write_lock.insert::<TrackTitleKey>(track_title);
 
     Ok(())
 }
