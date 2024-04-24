@@ -46,7 +46,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(help, join, leave, mute, play, skip, stop, unmute)]
+#[commands(help, join, leave, mute, play, skip, stop, unmute, queue)]
 struct General;
 
 #[tokio::main]
@@ -80,12 +80,11 @@ async fn main() {
 }
 
 async fn get_http_client(ctx: &Context) -> HttpClient {
-    ctx.data
-        .read()
-        .await
+    let typemap = ctx.data.read().await;
+    typemap
         .get::<HttpKey>()
         .cloned()
-        .expect("Guaranteed to exist in the typemap.")
+        .expect("HttpKey guaranteed to exist in typemap")
 }
 
 #[command]
@@ -108,31 +107,30 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 
     let manager = songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialization.")
-        .clone();
+        .expect("Expected songbird in context");
 
     if manager.get(guild_id).is_some() {
-        let res = author_channel_id
+        let message = author_channel_id
             .map(|chan| format!("Already in use at {}", chan.mention()))
             .unwrap_or_else(|| String::from("Already in use at another voice channel"));
 
-        check_msg(msg.reply(ctx, res).await);
+        check_msg(msg.reply(ctx, message).await);
         return Ok(());
     }
 
     let Ok(voice_lock) = manager.join(guild_id, connect_to).await else {
-        let res = format!("Could not join the voice channel {}", connect_to.mention());
-        check_msg(msg.channel_id.say(&ctx.http, res).await);
+        let message = format!("Could not join the voice channel {}", connect_to.mention());
+        check_msg(msg.channel_id.say(&ctx.http, message).await);
         return Ok(());
     };
 
-    let res = format!("Joined {}", connect_to.mention());
-    check_msg(msg.channel_id.say(&ctx.http, res).await);
+    let message = format!("Joined {}", connect_to.mention());
+    check_msg(msg.channel_id.say(&ctx.http, message).await);
 
     let mut voice_handler = voice_lock.lock().await;
     if let Err(err) = voice_handler.deafen(true).await {
-        let res = format!("Failed: {:?}", err);
-        check_msg(msg.channel_id.say(&ctx.http, res).await);
+        let message = format!("Failed: {:?}", err);
+        check_msg(msg.channel_id.say(&ctx.http, message).await);
         return Ok(());
     }
 
@@ -148,8 +146,8 @@ struct TrackEndHandler {
 impl VoiceEventHandler for TrackEndHandler {
     async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
         if let EventContext::Track([(_, handle)]) = ctx {
-            let typemap_read_lock = handle.typemap().blocking_read();
-            let title = typemap_read_lock.get::<TrackTitleKey>();
+            let typemap = handle.typemap().read().await;
+            let title = typemap.get::<TrackTitleKey>();
             let message = match title {
                 Some(title) => format!("Track {title} ended"),
                 None => String::from("Track ended"),
@@ -176,22 +174,21 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 
     let manager = songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialization.")
-        .clone();
+        .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
         check_msg(msg.reply(ctx, "Not in a voice channel").await);
         return Ok(());
     };
 
-    let voice_channel = voice_lock.lock().await.current_channel();
-    if author_channel_id.map(songbird::id::ChannelId::from) != voice_channel {
+    let voice_channel_id = voice_lock.lock().await.current_channel();
+    if author_channel_id.map(songbird::id::ChannelId::from) != voice_channel_id {
         check_msg(msg.reply(ctx, "Not in same voice channel").await);
         return Ok(());
     }
 
-    if let Err(e) = manager.remove(guild_id).await {
-        tracing::error!("Failed leaving voice channel: {e:?}");
+    if let Err(err) = manager.remove(guild_id).await {
+        tracing::error!("Failed leaving voice channel: {err:?}");
         let message = "Could not leave voice channel";
         check_msg(msg.channel_id.say(&ctx.http, message).await);
         return Ok(());
@@ -209,22 +206,34 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
+    let (guild_id, author_channel_id) = {
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
+        let channel_id = guild
+            .voice_states
+            .get(&msg.author.id)
+            .and_then(|vs| vs.channel_id);
+
+        (guild.id, channel_id)
+    };
+
     let manager = songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialization.")
-        .clone();
+        .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
         check_msg(msg.reply(ctx, "Not in a voice channel").await);
         return Ok(());
     };
 
-    let mut voice_handler = voice_lock.lock().await;
+    let mut voice = voice_lock.lock().await;
+    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        return Ok(());
+    }
 
-    if voice_handler.is_mute() {
+    if voice.is_mute() {
         check_msg(msg.channel_id.say(&ctx.http, "Already muted").await);
-    } else if let Err(e) = voice_handler.mute(true).await {
+    } else if let Err(e) = voice.mute(true).await {
         let message = format!("Failed: {:?}", e);
         check_msg(msg.channel_id.say(&ctx.http, message).await);
     } else {
@@ -239,19 +248,18 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
 async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let guild_id = msg.guild_id.expect("Expected guild_id to be defined");
     let Ok(music) = args.single::<String>() else {
-        let res = "Must provide a music name ou URL as argument";
-        check_msg(msg.channel_id.say(&ctx.http, res).await);
+        let message = "Must provide a music name ou URL as argument";
+        check_msg(msg.channel_id.say(&ctx.http, message).await);
         return Ok(());
     };
 
     let manager = songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialization")
-        .clone();
+        .expect("Expected songbird in context");
 
-    let voice_lock = if let Some(lock) = manager.get(guild_id) {
-        lock
-    } else if join(ctx, msg, args.clone()).await.is_ok() {
+    let voice_lock = if let Some(voice_lock) = manager.get(guild_id) {
+        voice_lock
+    } else if join(ctx, msg, args).await.is_ok() {
         manager
             .get(guild_id)
             .expect("Expected voice lock after joining voice channel")
@@ -277,26 +285,26 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     };
 
     let track_handle = voice_lock.lock().await.enqueue_input(src).await;
-
     let track_end_handler = TrackEndHandler {
         channel_id: msg.channel_id,
         http: ctx.http.clone(),
     };
+
     if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), track_end_handler) {
         tracing::error!("Failed adding track end event handler: {err}");
         check_msg(msg.channel_id.say(&ctx.http, "Failed loading track").await);
         return Ok(());
     }
 
-    let track_title = metadata
-        .title
-        .unwrap_or_else(|| String::from("Unknown track"));
-
+    let track_title = match metadata.title {
+        Some(title) => title,
+        None => String::from("Unknown track"),
+    };
     let message = format!("Track {track_title} added to queue");
     check_msg(msg.channel_id.say(&ctx.http, message).await);
 
-    let mut typemap_write_lock = track_handle.typemap().blocking_write();
-    typemap_write_lock.insert::<TrackTitleKey>(track_title);
+    let mut typemap = track_handle.typemap().write().await;
+    typemap.insert::<TrackTitleKey>(track_title);
 
     Ok(())
 }
@@ -304,21 +312,32 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
+    let (guild_id, author_channel_id) = {
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
+        let channel_id = guild
+            .voice_states
+            .get(&msg.author.id)
+            .and_then(|vs| vs.channel_id);
+
+        (guild.id, channel_id)
+    };
 
     let manager = songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialization")
-        .clone();
+        .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let message = "Not in a voice channel to play in";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        check_msg(msg.reply(ctx, "Not in a voice channel").await);
         return Ok(());
     };
 
-    let voice_handler = voice_lock.lock().await;
-    let queue = voice_handler.queue();
+    let voice = voice_lock.lock().await;
+    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        return Ok(());
+    }
+
+    let queue = voice.queue();
     if let Some(err) = queue.skip().err() {
         tracing::error!("Failed skipping queue song: {err}");
         return Ok(());
@@ -336,20 +355,32 @@ async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
+    let (guild_id, author_channel_id) = {
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
+        let channel_id = guild
+            .voice_states
+            .get(&msg.author.id)
+            .and_then(|vs| vs.channel_id);
+
+        (guild.id, channel_id)
+    };
 
     let manager = songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialization.")
-        .clone();
+        .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let message = "Not in a voice channel to play in";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        check_msg(msg.reply(ctx, "Not in a voice channel").await);
         return Ok(());
     };
 
-    voice_lock.lock().await.queue().stop();
+    let voice = voice_lock.lock().await;
+    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        return Ok(());
+    }
+
+    voice.queue().stop();
 
     check_msg(msg.channel_id.say(&ctx.http, "Queue cleared.").await);
 
@@ -359,26 +390,94 @@ async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 #[command]
 #[only_in(guilds)]
 async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
-    let guild_id = msg.guild_id.unwrap();
+    let (guild_id, author_channel_id) = {
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
+        let channel_id = guild
+            .voice_states
+            .get(&msg.author.id)
+            .and_then(|vs| vs.channel_id);
+
+        (guild.id, channel_id)
+    };
+
     let manager = songbird::get(ctx)
         .await
-        .expect("Songbird Voice client placed in at initialization.")
-        .clone();
+        .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let message = "Not in a voice channel to unmute in";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        check_msg(msg.reply(ctx, "Not in a voice channel").await);
         return Ok(());
     };
 
-    let mut voice_handler = voice_lock.lock().await;
-    if let Err(e) = voice_handler.mute(false).await {
-        let message = format!("Failed: {:?}", e);
+    let mut voice = voice_lock.lock().await;
+    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        return Ok(());
+    }
+
+    if let Err(err) = voice.mute(false).await {
+        let message = format!("Failed: {:?}", err);
         check_msg(msg.channel_id.say(&ctx.http, message).await);
     } else {
         check_msg(msg.channel_id.say(&ctx.http, "Unmuted").await);
     }
 
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
+    let (guild_id, author_channel_id) = {
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
+        let channel_id = guild
+            .voice_states
+            .get(&msg.author.id)
+            .and_then(|vs| vs.channel_id);
+
+        (guild.id, channel_id)
+    };
+
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Expected songbird in context");
+
+    let Some(voice_lock) = manager.get(guild_id) else {
+        check_msg(msg.reply(&ctx.http, "Not in a voice channel").await);
+        return Ok(());
+    };
+
+    let voice = voice_lock.lock().await;
+    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        return Ok(());
+    }
+
+    let tracks = voice.queue().current_queue();
+    if tracks.is_empty() {
+        let message = "Queue is currently empty";
+        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        return Ok(());
+    }
+
+    let mut message = String::with_capacity(tracks.len() * 10);
+    for (idx, handle) in tracks.iter().enumerate() {
+        let typemap = handle.typemap().read().await;
+        let title = typemap
+            .get::<TrackTitleKey>()
+            .cloned()
+            .expect("Track title guaranteed to exists in typemap");
+
+        let label = match idx {
+            0 => format!("Now playing: {title}\n"),
+            i if i == tracks.len() - 1 => format!("{i}. {title}"),
+            i => format!("{i}. {title}\n"),
+        };
+
+        message.push_str(&label);
+    }
+
+    check_msg(msg.channel_id.say(&ctx.http, message).await);
     Ok(())
 }
 
