@@ -52,7 +52,7 @@ struct General;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::ERROR)
+        .with_max_level(tracing::Level::DEBUG)
         .with_thread_ids(false)
         .with_thread_names(false)
         .compact()
