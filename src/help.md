@@ -14,7 +14,7 @@ Mutes **Rina**. Beware, if playing a track, no sound will come out
 Must provide an **url** or a music as argument. If **Rina** is not in a voice channel yet, it's going to join your current voice channel and enqueue the provided music
 
 **!skip**
-Skips current track. Skipping an arbitrary number of track is not implemented yet
+Skips tracks. Accepts an optional paremeter to define amount of tracks to skip
 
 **!stop**
 Stops **Rina** from playing tracks, also clears all tracks in queue
