@@ -15,6 +15,7 @@ use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
 use serenity::Result as SerenityResult;
 use songbird::input::{Input, YoutubeDl};
+use songbird::tracks::Queued;
 use songbird::TrackEvent;
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit};
 
@@ -311,7 +312,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
-async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
+async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let (guild_id, author_channel_id) = {
         let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
         let channel_id = guild
@@ -338,15 +339,60 @@ async fn skip(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     }
 
     let queue = voice.queue();
-    if let Some(err) = queue.skip().err() {
-        tracing::error!("Failed skipping queue song: {err}");
+    if queue.is_empty() {
+        let message = "Queue is empty. No tracks to skip";
+        check_msg(msg.reply(&ctx.http, message).await);
         return Ok(());
     }
 
-    let message = format!(
-        "Track skipped. Remaining {} track(s) in queue",
-        queue.len() - 1
-    );
+    let amount = match args
+        .single::<String>()
+        .ok()
+        .and_then(|arg| arg.parse::<usize>().ok())
+    {
+        Some(amount) if amount > 0 => amount,
+        _ => {
+            let message = "Amount of tracks to skip must be a non zero positive int";
+            check_msg(msg.reply(&ctx.http, message).await);
+            return Ok(());
+        }
+    };
+
+    if let Err(err) = queue.skip() {
+        tracing::error!("Failed skipping current track: {err}");
+        let message = "Could not skip current track";
+        check_msg(msg.reply(&ctx.http, message).await);
+        return Ok(());
+    }
+
+    if amount == 1usize {
+        // TODO: add track title in
+        let message = "Skipped playing track";
+        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        return Ok(());
+    }
+
+    let mut message = String::with_capacity(amount * 10);
+    message.push_str("Skipped following tracks:\n");
+
+    let skipped_tracks = queue.modify_queue(|q| q.drain(0..amount).collect::<Vec<Queued>>());
+    let total_skipped = skipped_tracks.len();
+    for (idx, track) in skipped_tracks.into_iter().enumerate() {
+        let handle = track.handle();
+        let typemap = handle.typemap().read().await;
+        let title = typemap
+            .get::<TrackTitleKey>()
+            .cloned()
+            .expect("Track title guaranteed to exists in typemap");
+
+        let label = match idx {
+            idx if idx == total_skipped - 1 => format!("{idx}. {title}"),
+            idx => format!("{idx}. {title}\n"),
+        };
+
+        message.push_str(&label);
+    }
+
     check_msg(msg.channel_id.say(&ctx.http, message).await);
 
     Ok(())
