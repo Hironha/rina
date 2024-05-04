@@ -2,7 +2,7 @@ use std::env;
 use std::sync::Arc;
 
 use reqwest::Client as HttpClient;
-use serenity::all::ChannelId;
+use serenity::all::{ChannelId, ChannelType, VoiceState};
 use serenity::async_trait;
 use serenity::client::{Client, Context, EventHandler};
 use serenity::framework::standard::macros::{command, group};
@@ -43,6 +43,47 @@ impl EventHandler for Handler {
             .expect("Could not set global slash commands");
 
         tracing::info!("{} is connected!", ready.user.name);
+    }
+
+    async fn voice_state_update(&self, ctx: Context, old: Option<VoiceState>, new: VoiceState) {
+        let channel_id = match (old.and_then(|state| state.channel_id), new.channel_id) {
+            // if old state has channel_id and new state doesn't, it means the user left voice channel
+            (Some(channel_id), None) => channel_id,
+            _ => return,
+        };
+
+        let Some(guild_id) = new.guild_id else {
+            return tracing::error!("guild_id not defined in new state");
+        };
+
+        let channels = match guild_id.channels(&ctx.http).await {
+            Ok(channels) => channels,
+            Err(err) => return tracing::error!("Failed getting guild channels: {err}"),
+        };
+
+        let voice_channel = match channels.get(&channel_id) {
+            Some(channel) if channel.kind == ChannelType::Voice => channel,
+            Some(_) => return tracing::info!("No voice channel defined for {channel_id}"),
+            None => return tracing::info!("No channel defined for {channel_id}"),
+        };
+
+        let members = match voice_channel.members(&ctx.cache) {
+            Ok(members) => members,
+            Err(err) => return tracing::error!("Failed getting members from channel: {err}"),
+        };
+
+        if !members.is_empty() {
+            let remaining = members.len();
+            return tracing::info!("Remaining {remaining} members connected to voice channel");
+        }
+
+        let manager = songbird::get(&ctx)
+            .await
+            .expect("Expected songbird in context");
+
+        if let Err(err) = manager.remove(guild_id).await {
+            return tracing::error!("Failed leaving empty voice channel automatically: {err}");
+        }
     }
 }
 
@@ -128,8 +169,8 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     let message = format!("Joined {}", connect_to.mention());
     check_msg(msg.channel_id.say(&ctx.http, message).await);
 
-    let mut voice_handler = voice_lock.lock().await;
-    if let Err(err) = voice_handler.deafen(true).await {
+    let mut voice = voice_lock.lock().await;
+    if let Err(err) = voice.deafen(true).await {
         let message = format!("Failed: {:?}", err);
         check_msg(msg.channel_id.say(&ctx.http, message).await);
         return Ok(());
