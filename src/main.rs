@@ -152,10 +152,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     if manager.get(guild_id).is_some() {
-        let message = author_channel_id
-            .map(|chan| format!("Already in use at {}", chan.mention()))
-            .unwrap_or_else(|| String::from("Already in use at another voice channel"));
-
+        let message = "Already in use at another voice channel";
         check_msg(msg.reply(ctx, message).await);
         return Ok(());
     }
