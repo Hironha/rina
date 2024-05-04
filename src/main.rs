@@ -350,7 +350,8 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .ok()
         .and_then(|arg| arg.parse::<usize>().ok())
     {
-        Some(amount) if amount > 0 => amount,
+        Some(0) => 1,
+        Some(amount) => amount,
         _ => {
             let message = "Amount of tracks to skip must be a non zero positive int";
             check_msg(msg.reply(&ctx.http, message).await);
