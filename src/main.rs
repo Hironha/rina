@@ -13,7 +13,6 @@ use serenity::model::application::Command;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
-use serenity::Result as SerenityResult;
 use songbird::input::{Input, YoutubeDl};
 use songbird::tracks::Queued;
 use songbird::TrackEvent;
@@ -94,7 +93,7 @@ struct General;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .with_thread_ids(false)
         .with_thread_names(false)
         .compact()
@@ -574,7 +573,7 @@ async fn help(ctx: &Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
-fn check_msg(result: SerenityResult<Message>) {
+fn check_msg(result: serenity::Result<Message>) {
     if let Err(err) = result {
         tracing::error!("Error sending message: {:?}", err);
     }
