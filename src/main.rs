@@ -2,7 +2,7 @@ use std::env;
 use std::sync::Arc;
 
 use reqwest::Client as HttpClient;
-use serenity::all::ChannelId;
+use serenity::all::{ChannelId, ChannelType, VoiceState};
 use serenity::async_trait;
 use serenity::client::{Client, Context, EventHandler};
 use serenity::framework::standard::macros::{command, group};
@@ -13,7 +13,6 @@ use serenity::model::application::Command;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
-use serenity::Result as SerenityResult;
 use songbird::input::{Input, YoutubeDl};
 use songbird::tracks::Queued;
 use songbird::TrackEvent;
@@ -44,6 +43,47 @@ impl EventHandler for Handler {
 
         tracing::info!("{} is connected!", ready.user.name);
     }
+
+    async fn voice_state_update(&self, ctx: Context, old: Option<VoiceState>, new: VoiceState) {
+        let channel_id = match (old.and_then(|state| state.channel_id), new.channel_id) {
+            // if old state has channel_id and new state doesn't, it means the user left voice channel
+            (Some(channel_id), None) => channel_id,
+            _ => return tracing::info!("Voice state updated, but not a leave event"),
+        };
+
+        let Some(guild_id) = new.guild_id else {
+            return tracing::error!("Unexpected guild_id not defined in new state");
+        };
+
+        let channels = match guild_id.channels(&ctx.http).await {
+            Ok(channels) => channels,
+            Err(err) => return tracing::error!("Failed getting guild channels: {err:?}"),
+        };
+
+        let voice_channel = match channels.get(&channel_id) {
+            Some(channel) if channel.kind == ChannelType::Voice => channel,
+            Some(_) => return tracing::info!("No voice channel defined for {channel_id}"),
+            None => return tracing::info!("No channel defined for {channel_id}"),
+        };
+
+        let members = match voice_channel.members(&ctx.cache) {
+            Ok(members) => members,
+            Err(err) => return tracing::error!("Failed getting members from channel: {err:?}"),
+        };
+
+        if members.len() > 1 {
+            let remaining = members.len();
+            return tracing::info!("Remaining {remaining} members connected to voice channel");
+        }
+
+        let manager = songbird::get(&ctx)
+            .await
+            .expect("Expected songbird in context");
+
+        if let Err(err) = manager.remove(voice_channel.guild_id).await {
+            return tracing::error!("Failed leaving empty voice channel automatically: {err:?}");
+        }
+    }
 }
 
 #[group]
@@ -53,7 +93,7 @@ struct General;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .with_thread_ids(false)
         .with_thread_names(false)
         .compact()
@@ -111,10 +151,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     if manager.get(guild_id).is_some() {
-        let message = author_channel_id
-            .map(|chan| format!("Already in use at {}", chan.mention()))
-            .unwrap_or_else(|| String::from("Already in use at another voice channel"));
-
+        let message = "Already in use at another voice channel";
         check_msg(msg.reply(ctx, message).await);
         return Ok(());
     }
@@ -128,8 +165,8 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     let message = format!("Joined {}", connect_to.mention());
     check_msg(msg.channel_id.say(&ctx.http, message).await);
 
-    let mut voice_handler = voice_lock.lock().await;
-    if let Err(err) = voice_handler.deafen(true).await {
+    let mut voice = voice_lock.lock().await;
+    if let Err(err) = voice.deafen(true).await {
         let message = format!("Failed: {:?}", err);
         check_msg(msg.channel_id.say(&ctx.http, message).await);
         return Ok(());
@@ -347,12 +384,11 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let amount = match args
         .single::<String>()
-        .ok()
-        .and_then(|arg| arg.parse::<usize>().ok())
+        .unwrap_or_else(|_| String::from("1"))
+        .parse::<usize>()
     {
-        Some(0) => 1,
-        Some(amount) => amount,
-        _ => {
+        Ok(amount) => amount,
+        Err(_) => {
             let message = "Amount of tracks to skip must be a non zero positive int";
             check_msg(msg.reply(&ctx.http, message).await);
             return Ok(());
@@ -536,7 +572,7 @@ async fn help(ctx: &Context, msg: &Message) -> CommandResult {
     Ok(())
 }
 
-fn check_msg(result: SerenityResult<Message>) {
+fn check_msg(result: serenity::Result<Message>) {
     if let Err(err) = result {
         tracing::error!("Error sending message: {:?}", err);
     }
