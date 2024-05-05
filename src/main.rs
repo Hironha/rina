@@ -48,11 +48,11 @@ impl EventHandler for Handler {
         let channel_id = match (old.and_then(|state| state.channel_id), new.channel_id) {
             // if old state has channel_id and new state doesn't, it means the user left voice channel
             (Some(channel_id), None) => channel_id,
-            _ => return,
-        };
+            _ => return tracing::info!("Voice state updated, but not a leave event"),
+        };  
 
         let Some(guild_id) = new.guild_id else {
-            return tracing::error!("guild_id not defined in new state");
+            return tracing::error!("Unexpected guild_id not defined in new state");
         };
 
         let channels = match guild_id.channels(&ctx.http).await {
