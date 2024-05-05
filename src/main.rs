@@ -49,7 +49,7 @@ impl EventHandler for Handler {
             // if old state has channel_id and new state doesn't, it means the user left voice channel
             (Some(channel_id), None) => channel_id,
             _ => return tracing::info!("Voice state updated, but not a leave event"),
-        };  
+        };
 
         let Some(guild_id) = new.guild_id else {
             return tracing::error!("Unexpected guild_id not defined in new state");
@@ -384,12 +384,11 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let amount = match args
         .single::<String>()
-        .ok()
-        .and_then(|arg| arg.parse::<usize>().ok())
+        .unwrap_or_else(|_| String::from("1"))
+        .parse::<usize>()
     {
-        Some(0) => 1,
-        Some(amount) => amount,
-        _ => {
+        Ok(amount) => amount,
+        Err(_) => {
             let message = "Amount of tracks to skip must be a non zero positive int";
             check_msg(msg.reply(&ctx.http, message).await);
             return Ok(());
