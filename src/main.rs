@@ -57,7 +57,7 @@ impl EventHandler for Handler {
 
         let channels = match guild_id.channels(&ctx.http).await {
             Ok(channels) => channels,
-            Err(err) => return tracing::error!("Failed getting guild channels: {err}"),
+            Err(err) => return tracing::error!("Failed getting guild channels: {err:?}"),
         };
 
         let voice_channel = match channels.get(&channel_id) {
@@ -68,10 +68,10 @@ impl EventHandler for Handler {
 
         let members = match voice_channel.members(&ctx.cache) {
             Ok(members) => members,
-            Err(err) => return tracing::error!("Failed getting members from channel: {err}"),
+            Err(err) => return tracing::error!("Failed getting members from channel: {err:?}"),
         };
 
-        if !members.is_empty() {
+        if members.len() > 1 {
             let remaining = members.len();
             return tracing::info!("Remaining {remaining} members connected to voice channel");
         }
@@ -80,8 +80,8 @@ impl EventHandler for Handler {
             .await
             .expect("Expected songbird in context");
 
-        if let Err(err) = manager.remove(guild_id).await {
-            return tracing::error!("Failed leaving empty voice channel automatically: {err}");
+        if let Err(err) = manager.remove(voice_channel.guild_id).await {
+            return tracing::error!("Failed leaving empty voice channel automatically: {err:?}");
         }
     }
 }
