@@ -25,7 +25,7 @@ docker run -e DISCORD_TOKEN=YOUR_TOKEN --name rina -d rina-image
 ### Roadmap to stable release
 
 - [x] add `!help` command
-- [ ] support playlist (perhaps in v0.4)
+- [ ] support playlist (perhaps in v0.5)
 - [x] Automatically leave empty voice channel
 - [ ] add commands to manage queue
   - [x] List queue
