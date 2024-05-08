@@ -1,3 +1,5 @@
+mod playlist;
+
 use std::env;
 use std::sync::Arc;
 
@@ -86,6 +88,28 @@ impl EventHandler for Handler {
     }
 }
 
+struct TrackEndHandler {
+    http: Arc<Http>,
+    channel_id: ChannelId,
+}
+
+#[async_trait]
+impl VoiceEventHandler for TrackEndHandler {
+    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
+        if let EventContext::Track([(_, handle)]) = ctx {
+            let typemap = handle.typemap().read().await;
+            let title = typemap.get::<TrackTitleKey>();
+            let message = match title {
+                Some(title) => format!("Track {title} ended"),
+                None => String::from("Track ended"),
+            };
+            check_msg(self.channel_id.say(&self.http, message).await);
+        }
+
+        None
+    }
+}
+
 #[group]
 #[commands(help, join, leave, mute, play, skip, stop, unmute, queue)]
 struct General;
@@ -118,14 +142,6 @@ async fn main() {
         .start()
         .await
         .expect("Failed starting serenity client");
-}
-
-async fn get_http_client(ctx: &Context) -> HttpClient {
-    let typemap = ctx.data.read().await;
-    typemap
-        .get::<HttpKey>()
-        .cloned()
-        .expect("HttpKey guaranteed to exist in typemap")
 }
 
 #[command]
@@ -173,28 +189,6 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     }
 
     Ok(())
-}
-
-struct TrackEndHandler {
-    http: Arc<Http>,
-    channel_id: ChannelId,
-}
-
-#[async_trait]
-impl VoiceEventHandler for TrackEndHandler {
-    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
-        if let EventContext::Track([(_, handle)]) = ctx {
-            let typemap = handle.typemap().read().await;
-            let title = typemap.get::<TrackTitleKey>();
-            let message = match title {
-                Some(title) => format!("Track {title} ended"),
-                None => String::from("Track ended"),
-            };
-            check_msg(self.channel_id.say(&self.http, message).await);
-        }
-
-        None
-    }
 }
 
 #[command]
@@ -306,6 +300,39 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         return Ok(());
     };
 
+    if music.starts_with("http") && music.contains("&list=") {
+        let playlist_metadata = match playlist::query(&music).await {
+            Ok(metadata) => metadata,
+            Err(err) => {
+                tracing::error!("Failed quering playlist metadata: {err}");
+                let message = "Could not get playlist information";
+                check_msg(msg.reply(ctx, message).await);
+                return Ok(());
+            }
+        };
+
+        let mut voice = voice_lock.lock().await;
+        for metadata in playlist_metadata.into_iter() {
+            let src: Input = YoutubeDl::new(get_http_client(ctx).await, metadata.url).into();
+            let track_handle = voice.enqueue_input(src).await;
+            let end_handler = TrackEndHandler {
+                channel_id: msg.channel_id,
+                http: ctx.http.clone(),
+            };
+
+            if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), end_handler) {
+                tracing::error!("Failed adding track end event handler: {err}");
+                check_msg(msg.channel_id.say(&ctx.http, "Failed loading track").await);
+                return Ok(());
+            }
+
+            let message = format!("Track {} added to queue", metadata.title);
+            check_msg(msg.channel_id.say(&ctx.http, message).await)
+        }
+
+        return Ok(());
+    }
+
     let mut src: Input = if music.starts_with("http") {
         YoutubeDl::new(get_http_client(ctx).await, music).into()
     } else {
@@ -323,12 +350,12 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     };
 
     let track_handle = voice_lock.lock().await.enqueue_input(src).await;
-    let track_end_handler = TrackEndHandler {
+    let end_handler = TrackEndHandler {
         channel_id: msg.channel_id,
         http: ctx.http.clone(),
     };
 
-    if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), track_end_handler) {
+    if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), end_handler) {
         tracing::error!("Failed adding track end event handler: {err}");
         check_msg(msg.channel_id.say(&ctx.http, "Failed loading track").await);
         return Ok(());
@@ -570,6 +597,14 @@ async fn help(ctx: &Context, msg: &Message) -> CommandResult {
     check_msg(msg.reply(ctx, HELP_MESSAGE).await);
 
     Ok(())
+}
+
+async fn get_http_client(ctx: &Context) -> HttpClient {
+    let typemap = ctx.data.read().await;
+    typemap
+        .get::<HttpKey>()
+        .cloned()
+        .expect("HttpKey guaranteed to exist in typemap")
 }
 
 fn check_msg(result: serenity::Result<Message>) {
