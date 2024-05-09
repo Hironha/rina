@@ -300,6 +300,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         return Ok(());
     };
 
+    // FIXME: only works for youtube playlists, and it doesn't cover all cases 
     if music.starts_with("http") && music.contains("&list=") {
         let playlist_metadata = match playlist::query(&music).await {
             Ok(metadata) => metadata,
@@ -310,7 +311,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 return Ok(());
             }
         };
-
+        let playlist_len = playlist_metadata.len();
         let mut voice = voice_lock.lock().await;
         let http_client = get_http_client(ctx).await;
         for metadata in playlist_metadata.into_iter() {
@@ -323,17 +324,17 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
             if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), end_handler) {
                 tracing::error!("Failed adding track end event handler: {err}");
-                check_msg(msg.channel_id.say(&ctx.http, "Failed loading track").await);
+                let message = format!("Failed laoding track {}", metadata.title);
+                check_msg(msg.channel_id.say(&ctx.http, message).await);
                 return Ok(());
             }
 
             let mut typemap = track_handle.typemap().write().await;
-            let message = format!("Track {} added to queue", metadata.title);
-
             typemap.insert::<TrackTitleKey>(metadata.title);
-            check_msg(msg.channel_id.say(&ctx.http, message).await)
         }
 
+        let message = format!("{playlist_len} tracks added to the queue");
+        check_msg(msg.channel_id.say(&ctx.http, message).await);
         return Ok(());
     }
 
