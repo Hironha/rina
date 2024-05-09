@@ -1,4 +1,5 @@
 use std::error;
+use std::io::BufRead;
 
 use serde::Deserialize;
 use tokio::process::Command;
@@ -19,8 +20,9 @@ pub async fn query(url: &str) -> Result<Vec<Metadata>, Box<dyn error::Error + Se
 
     let metadata = output
         .stdout
-        .split(|&b| b == b'\n')
-        .map(serde_json::from_slice)
+        .lines()
+        .map_while(|line| line.ok())
+        .map(|line| serde_json::from_str(&line))
         .collect::<Result<Vec<Metadata>, serde_json::Error>>()?;
 
     Ok(metadata)
