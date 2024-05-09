@@ -312,8 +312,9 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         };
 
         let mut voice = voice_lock.lock().await;
+        let http_client = get_http_client(ctx).await;
         for metadata in playlist_metadata.into_iter() {
-            let src: Input = YoutubeDl::new(get_http_client(ctx).await, metadata.url).into();
+            let src: Input = YoutubeDl::new(http_client.clone(), metadata.url).into();
             let track_handle = voice.enqueue_input(src).await;
             let end_handler = TrackEndHandler {
                 channel_id: msg.channel_id,
@@ -326,7 +327,10 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 return Ok(());
             }
 
+            let mut typemap = track_handle.typemap().write().await;
             let message = format!("Track {} added to queue", metadata.title);
+
+            typemap.insert::<TrackTitleKey>(metadata.title);
             check_msg(msg.channel_id.say(&ctx.http, message).await)
         }
 
@@ -365,11 +369,11 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         Some(title) => title,
         None => String::from("Unknown track"),
     };
-    let message = format!("Track {track_title} added to queue");
-    check_msg(msg.channel_id.say(&ctx.http, message).await);
-
     let mut typemap = track_handle.typemap().write().await;
+    let message = format!("Track {track_title} added to queue");
+
     typemap.insert::<TrackTitleKey>(track_title);
+    check_msg(msg.channel_id.say(&ctx.http, message).await);
 
     Ok(())
 }
