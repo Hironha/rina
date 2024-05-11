@@ -14,7 +14,7 @@ use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
 use songbird::input::{Input, YoutubeDl};
-use songbird::tracks::Queued;
+use songbird::tracks::{Queued, Track};
 use songbird::TrackEvent;
 use songbird::{Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit};
 
@@ -309,8 +309,8 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         let http_client = get_http_client(ctx).await;
 
         for metadata in playlist_metadata.into_iter() {
-            let src: Input = YoutubeDl::new(http_client.clone(), metadata.url).into();
-            voice.enqueue_input(src).await;
+            let track = Track::from(YoutubeDl::new(http_client.clone(), metadata.url));
+            voice.enqueue_with_preload(track, None);
         }
 
         let message = format!("{playlist_len} tracks added to the queue");
@@ -334,7 +334,8 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         }
     };
 
-    let track_handle = voice_lock.lock().await.enqueue_input(src).await;
+    let mut voice = voice_lock.lock().await;
+    let track_handle = voice.enqueue_with_preload(src.into(), None);
     if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), TrackEndHandler) {
         tracing::error!("Failed adding track end event handler: {err}");
         check_msg(msg.channel_id.say(&ctx.http, "Failed loading track").await);
