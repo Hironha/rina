@@ -1,16 +1,14 @@
 mod playlist;
 
 use std::env;
-use std::sync::Arc;
 
 use reqwest::Client as HttpClient;
-use serenity::all::{ChannelId, ChannelType, VoiceState};
+use serenity::all::{ChannelType, VoiceState};
 use serenity::async_trait;
 use serenity::client::{Client, Context, EventHandler};
 use serenity::framework::standard::macros::{command, group};
 use serenity::framework::standard::{Args, CommandResult, Configuration};
 use serenity::framework::StandardFramework;
-use serenity::http::Http;
 use serenity::model::application::Command;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
@@ -88,22 +86,17 @@ impl EventHandler for Handler {
     }
 }
 
-struct TrackEndHandler {
-    http: Arc<Http>,
-    channel_id: ChannelId,
-}
+struct TrackEndHandler;
 
 #[async_trait]
 impl VoiceEventHandler for TrackEndHandler {
     async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
         if let EventContext::Track([(_, handle)]) = ctx {
             let typemap = handle.typemap().read().await;
-            let title = typemap.get::<TrackTitleKey>();
-            let message = match title {
-                Some(title) => format!("Track {title} ended"),
-                None => String::from("Track ended"),
+            match typemap.get::<TrackTitleKey>() {
+                Some(title) => tracing::info!("Track {title} ended"),
+                None => tracing::info!("Track ended"),
             };
-            check_msg(self.channel_id.say(&self.http, message).await);
         }
 
         None
@@ -300,7 +293,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         return Ok(());
     };
 
-    // FIXME: only works for youtube playlists, and it doesn't cover all cases 
+    // FIXME: only works for youtube playlists, and it doesn't cover all cases
     if music.starts_with("http") && music.contains("&list=") {
         let playlist_metadata = match playlist::query(&music).await {
             Ok(metadata) => metadata,
@@ -314,23 +307,10 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         let playlist_len = playlist_metadata.len();
         let mut voice = voice_lock.lock().await;
         let http_client = get_http_client(ctx).await;
+
         for metadata in playlist_metadata.into_iter() {
             let src: Input = YoutubeDl::new(http_client.clone(), metadata.url).into();
-            let track_handle = voice.enqueue_input(src).await;
-            let end_handler = TrackEndHandler {
-                channel_id: msg.channel_id,
-                http: ctx.http.clone(),
-            };
-
-            if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), end_handler) {
-                tracing::error!("Failed adding track end event handler: {err}");
-                let message = format!("Failed laoding track {}", metadata.title);
-                check_msg(msg.channel_id.say(&ctx.http, message).await);
-                return Ok(());
-            }
-
-            let mut typemap = track_handle.typemap().write().await;
-            typemap.insert::<TrackTitleKey>(metadata.title);
+            voice.enqueue_input(src).await;
         }
 
         let message = format!("{playlist_len} tracks added to the queue");
@@ -355,26 +335,14 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     };
 
     let track_handle = voice_lock.lock().await.enqueue_input(src).await;
-    let end_handler = TrackEndHandler {
-        channel_id: msg.channel_id,
-        http: ctx.http.clone(),
-    };
-
-    if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), end_handler) {
+    if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), TrackEndHandler) {
         tracing::error!("Failed adding track end event handler: {err}");
         check_msg(msg.channel_id.say(&ctx.http, "Failed loading track").await);
         return Ok(());
     }
 
-    let track_title = match metadata.title {
-        Some(title) => title,
-        None => String::from("Unknown track"),
-    };
     let mut typemap = track_handle.typemap().write().await;
-    let message = format!("Track {track_title} added to queue");
-
-    typemap.insert::<TrackTitleKey>(track_title);
-    check_msg(msg.channel_id.say(&ctx.http, message).await);
+    typemap.insert::<TrackTitleKey>(metadata.title.unwrap_or_else(|| String::from("Unknown")));
 
     Ok(())
 }
