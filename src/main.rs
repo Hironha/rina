@@ -13,10 +13,9 @@ use serenity::model::application::Command;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
-use songbird::input::{Input, YoutubeDl};
+use songbird::input::YoutubeDl;
 use songbird::tracks::{Queued, Track};
-use songbird::TrackEvent;
-use songbird::{Event, EventContext, EventHandler as VoiceEventHandler, SerenityInit};
+use songbird::SerenityInit;
 
 const HELP_MESSAGE: &str = include_str!("help.md");
 
@@ -83,23 +82,6 @@ impl EventHandler for Handler {
         if let Err(err) = manager.remove(voice_channel.guild_id).await {
             return tracing::error!("Failed leaving empty voice channel automatically: {err:?}");
         }
-    }
-}
-
-struct TrackEndHandler;
-
-#[async_trait]
-impl VoiceEventHandler for TrackEndHandler {
-    async fn act(&self, ctx: &EventContext<'_>) -> Option<Event> {
-        if let EventContext::Track([(_, handle)]) = ctx {
-            let typemap = handle.typemap().read().await;
-            match typemap.get::<TrackTitleKey>() {
-                Some(title) => tracing::info!("Track {title} ended"),
-                None => tracing::info!("Track ended"),
-            };
-        }
-
-        None
     }
 }
 
@@ -309,8 +291,8 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         let http_client = get_http_client(ctx).await;
 
         for metadata in playlist_metadata.into_iter() {
-            let track = Track::from(YoutubeDl::new(http_client.clone(), metadata.url));
-            voice.enqueue_with_preload(track, None);
+            let src = YoutubeDl::new(http_client.clone(), metadata.url);
+            voice.enqueue_with_preload(Track::from(src), None);
         }
 
         let message = format!("{playlist_len} tracks added to the queue");
@@ -318,32 +300,14 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         return Ok(());
     }
 
-    let mut src: Input = if music.starts_with("http") {
-        YoutubeDl::new(get_http_client(ctx).await, music).into()
+    let src = if music.starts_with("http") {
+        YoutubeDl::new(get_http_client(ctx).await, music)
     } else {
-        YoutubeDl::new_search(get_http_client(ctx).await, music).into()
-    };
-
-    let metadata = match src.aux_metadata().await {
-        Ok(metadata) => metadata,
-        Err(err) => {
-            tracing::error!("Failed loading track metadata: {err:?}");
-            let message = "Track could not be loaded";
-            check_msg(msg.channel_id.say(&ctx.http, message).await);
-            return Ok(());
-        }
+        YoutubeDl::new_search(get_http_client(ctx).await, music)
     };
 
     let mut voice = voice_lock.lock().await;
-    let track_handle = voice.enqueue_with_preload(src.into(), None);
-    if let Err(err) = track_handle.add_event(Event::Track(TrackEvent::End), TrackEndHandler) {
-        tracing::error!("Failed adding track end event handler: {err}");
-        check_msg(msg.channel_id.say(&ctx.http, "Failed loading track").await);
-        return Ok(());
-    }
-
-    let mut typemap = track_handle.typemap().write().await;
-    typemap.insert::<TrackTitleKey>(metadata.title.unwrap_or_else(|| String::from("Unknown")));
+    voice.enqueue_with_preload(Track::from(src), None);
 
     Ok(())
 }
