@@ -13,7 +13,7 @@ use serenity::model::application::Command;
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
-use songbird::input::YoutubeDl;
+use songbird::input::{Input, YoutubeDl};
 use songbird::tracks::{Queued, Track};
 use songbird::SerenityInit;
 
@@ -292,7 +292,9 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
         for metadata in playlist_metadata.into_iter() {
             let src = YoutubeDl::new(http_client.clone(), metadata.url);
-            voice.enqueue_with_preload(Track::from(src), None);
+            let track_handle = voice.enqueue_with_preload(Track::from(src), None);
+            let mut typemap = track_handle.typemap().write().await;
+            typemap.insert::<TrackTitleKey>(metadata.title)
         }
 
         let message = format!("{playlist_len} tracks added to the queue");
@@ -300,14 +302,18 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         return Ok(());
     }
 
-    let src = if music.starts_with("http") {
-        YoutubeDl::new(get_http_client(ctx).await, music)
+    let mut src: Input = if music.starts_with("http") {
+        YoutubeDl::new(get_http_client(ctx).await, music).into()
     } else {
-        YoutubeDl::new_search(get_http_client(ctx).await, music)
+        YoutubeDl::new_search(get_http_client(ctx).await, music).into()
     };
 
+    let metadata = src.aux_metadata().await?;
     let mut voice = voice_lock.lock().await;
-    voice.enqueue_with_preload(Track::from(src), None);
+    let track_handle = voice.enqueue_with_preload(Track::from(src), None);
+    let mut typemap = track_handle.typemap().write().await;
+    let title = metadata.title.unwrap_or_else(|| String::from("Unknown"));
+    typemap.insert::<TrackTitleKey>(title);
 
     Ok(())
 }
