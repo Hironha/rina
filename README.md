@@ -26,7 +26,7 @@ docker run -e DISCORD_TOKEN=YOUR_TOKEN --name rina -d rina-image
 
 - [x] add `!help` command
 - [x] support playlist (~~perhaps in v0.5~~)
-- [ ] improve playlist querying performance
+- [x] improve playlist querying performance
 - [x] Automatically leave empty voice channel
 - [ ] add commands to manage queue
   - [x] List queue
