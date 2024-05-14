@@ -4,17 +4,18 @@ use std::env;
 
 use reqwest::Client as HttpClient;
 use serenity::all::{ChannelType, VoiceState};
-use serenity::async_trait;
 use serenity::client::{Client, Context, EventHandler};
 use serenity::framework::standard::macros::{command, group};
 use serenity::framework::standard::{Args, CommandResult, Configuration};
 use serenity::framework::StandardFramework;
 use serenity::model::application::Command;
 use serenity::model::channel::Message;
+use serenity::model::error::Error as ModelError;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
+use serenity::{async_trait, Error as SerenityError};
 use songbird::input::{Input, YoutubeDl};
-use songbird::tracks::{Queued, Track};
+use songbird::tracks::{Queued, Track, TrackHandle};
 use songbird::SerenityInit;
 
 const HELP_MESSAGE: &str = include_str!("help.md");
@@ -86,7 +87,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(help, join, leave, mute, play, skip, stop, unmute, queue)]
+#[commands(help, join, leave, mute, play, skip, stop, unmute, queue, now, head)]
 struct General;
 
 #[tokio::main]
@@ -366,17 +367,19 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         }
     };
 
-    if let Err(err) = queue.skip() {
-        tracing::error!("Failed skipping current track: {err}");
-        let message = "Could not skip current track";
+    if amount == 1 {
+        let message: &str = if let Err(err) = queue.skip() {
+            tracing::error!("Failed skipping current track: {err}");
+            "Could not skip current track"
+        } else {
+            "Skipped current track"
+        };
+
         check_msg(msg.reply(&ctx.http, message).await);
         return Ok(());
-    }
-
-    if amount == 1usize {
-        // TODO: add track title in
-        let message = "Skipped playing track";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+    } else if amount > 20 {
+        let message = "Cannot skip more than 20 tracks at once";
+        check_msg(msg.reply(&ctx.http, message).await);
         return Ok(());
     }
 
@@ -525,6 +528,117 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
         let label = match idx {
             0 => format!("Now playing: {title}\n"),
             i if i == tracks.len() - 1 => format!("{i}. {title}"),
+            i => format!("{i}. {title}\n"),
+        };
+
+        message.push_str(&label);
+    }
+
+    if let Err(err) = msg.channel_id.say(&ctx.http, message).await {
+        let message = if let SerenityError::Model(ModelError::MessageTooLong(_)) = err {
+            String::from("Too many tracks to list. Use `!head` to see the tracks at the top")
+        } else {
+            tracing::error!("Failed sending message: {err:?}");
+            String::from("Could not send the message listing the tracks")
+        };
+
+        check_msg(msg.channel_id.say(&ctx.http, message).await)
+    }
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+async fn now(ctx: &Context, msg: &Message) -> CommandResult {
+    let (guild_id, author_channel_id) = {
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
+        let channel_id = guild
+            .voice_states
+            .get(&msg.author.id)
+            .and_then(|vs| vs.channel_id);
+
+        (guild.id, channel_id)
+    };
+
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Expected songbird in context");
+
+    let Some(voice_lock) = manager.get(guild_id) else {
+        check_msg(msg.reply(&ctx.http, "Not in a voice channel").await);
+        return Ok(());
+    };
+
+    let voice = voice_lock.lock().await;
+    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        return Ok(());
+    }
+
+    let Some(track_handle) = voice.queue().current() else {
+        let message = "Not playing any track";
+        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        return Ok(());
+    };
+
+    let typemap = track_handle.typemap().read().await;
+    let title = typemap
+        .get::<TrackTitleKey>()
+        .expect("Track title expected to be defined");
+
+    let message = format!("Now playing {title}");
+    check_msg(msg.channel_id.say(&ctx.http, message).await);
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+async fn head(ctx: &Context, msg: &Message) -> CommandResult {
+    let (guild_id, author_channel_id) = {
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
+        let channel_id = guild
+            .voice_states
+            .get(&msg.author.id)
+            .and_then(|vs| vs.channel_id);
+
+        (guild.id, channel_id)
+    };
+
+    let manager = songbird::get(ctx)
+        .await
+        .expect("Expected songbird in context");
+
+    let Some(voice_lock) = manager.get(guild_id) else {
+        check_msg(msg.reply(&ctx.http, "Not in a voice channel").await);
+        return Ok(());
+    };
+
+    let voice = voice_lock.lock().await;
+    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        return Ok(());
+    }
+
+    let tracks = voice.queue().current_queue();
+    if tracks.is_empty() {
+        let message = "Queue is currently empty";
+        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        return Ok(());
+    }
+
+    let top_tracks = tracks.into_iter().take(20).collect::<Vec<TrackHandle>>();
+    let mut message = String::with_capacity(top_tracks.len() * 10);
+    for (idx, handle) in top_tracks.iter().enumerate() {
+        let typemap = handle.typemap().read().await;
+        let title = typemap
+            .get::<TrackTitleKey>()
+            .cloned()
+            .expect("Track title guaranteed to exists in typemap");
+
+        let label = match idx {
+            0 => format!("Now playing: {title}\n"),
+            i if i == top_tracks.len() - 1 => format!("{i}. {title}"),
             i => format!("{i}. {title}\n"),
         };
 

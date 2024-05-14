@@ -23,4 +23,10 @@ Stops **Rina** from playing tracks, also clears all tracks in queue
 Unmutes **Rina**. Has no effect if **Rina** is already unmuted
 
 **!queue**
-List all enqueued tracks. May not work correctly if the queue is too big 
+List all enqueued tracks. May not work correctly if the queue is too big
+
+**!now**
+Show current track title
+
+**!head**
+List top 20 enqueued tracks.
