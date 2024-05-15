@@ -359,34 +359,46 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .unwrap_or_else(|_| String::from("1"))
         .parse::<usize>()
     {
+        Ok(amount) if amount > 20 => {
+            let message = "Cannot skip more than 20 tracks at once";
+            check_msg(msg.reply(&ctx.http, message).await);
+            return Ok(());
+        }
         Ok(amount) => amount,
         Err(_) => {
-            let message = "Amount of tracks to skip must be a non zero positive int";
+            let message = "Amount of tracks to skip must be a positive non zero integer";
             check_msg(msg.reply(&ctx.http, message).await);
             return Ok(());
         }
     };
 
-    if amount == 1 {
-        let message: &str = if let Err(err) = queue.skip() {
-            tracing::error!("Failed skipping current track: {err}");
-            "Could not skip current track"
-        } else {
-            "Skipped current track"
-        };
-
-        check_msg(msg.reply(&ctx.http, message).await);
+    let current_track = queue.current();
+    if let Err(err) = queue.skip() {
+        tracing::error!("Failed skipping current track: {err}");
+        let message = "Could not skip current track";
+        check_msg(msg.channel_id.say(&ctx.http, message).await);
         return Ok(());
-    } else if amount > 20 {
-        let message = "Cannot skip more than 20 tracks at once";
+    }
+
+    if amount == 1 {
+        let message = match current_track {
+            Some(track) => {
+                let typemap = track.typemap().read().await;
+                let title = typemap
+                    .get::<TrackTitleKey>()
+                    .expect("Expected track title in typemap");
+                format!("Current track {title} skipped")
+            }
+            None => String::from("Current track skipped"),
+        };
         check_msg(msg.reply(&ctx.http, message).await);
         return Ok(());
     }
 
-    let mut message = String::with_capacity(amount * 10);
+    let mut message = String::with_capacity((amount - 1) * 10);
     message.push_str("Skipped following tracks:\n");
 
-    let skipped_tracks = queue.modify_queue(|q| q.drain(0..amount).collect::<Vec<Queued>>());
+    let skipped_tracks = queue.modify_queue(|q| q.drain(0..amount - 1).collect::<Vec<Queued>>());
     let total_skipped = skipped_tracks.len();
     for (idx, track) in skipped_tracks.into_iter().enumerate() {
         let handle = track.handle();
