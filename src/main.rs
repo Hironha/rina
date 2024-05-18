@@ -3,7 +3,7 @@ mod playlist;
 use std::env;
 
 use reqwest::Client as HttpClient;
-use serenity::all::{ChannelType, VoiceState};
+use serenity::all::{ChannelType, Color, CreateEmbed, CreateMessage, VoiceState};
 use serenity::client::{Client, Context, EventHandler};
 use serenity::framework::standard::macros::{command, group};
 use serenity::framework::standard::{Args, CommandResult, Configuration};
@@ -18,6 +18,8 @@ use songbird::input::{Input, YoutubeDl};
 use songbird::tracks::{Queued, Track, TrackHandle};
 use songbird::SerenityInit;
 
+const ERROR_COLOR: Color = Color::RED;
+const DEFAULT_COLOR: Color = Color::ORANGE;
 const HELP_MESSAGE: &str = include_str!("help.md");
 
 struct HttpKey;
@@ -134,7 +136,13 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     };
 
     let Some(connect_to) = author_channel_id else {
-        check_msg(msg.reply(ctx, "Not in a voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("Error")
+            .description("User not in a voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
@@ -143,25 +151,39 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     if manager.get(guild_id).is_some() {
-        let message = "Already in use at another voice channel";
-        check_msg(msg.reply(ctx, message).await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("Error")
+            .description("I'm already in another voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(ctx, message).await);
         return Ok(());
     }
 
     let Ok(voice_lock) = manager.join(guild_id, connect_to).await else {
-        let message = format!("Could not join the voice channel {}", connect_to.mention());
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        let description = format!("Could not join the voice channel {}", connect_to.mention());
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("Error")
+            .description(description);
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
-    let message = format!("Joined {}", connect_to.mention());
-    check_msg(msg.channel_id.say(&ctx.http, message).await);
+    let embed = CreateEmbed::new()
+        .color(DEFAULT_COLOR)
+        .title("Join")
+        .description(format!("Joined {}", connect_to.mention()));
+
+    let message = CreateMessage::new().add_embed(embed);
+    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
 
     let mut voice = voice_lock.lock().await;
     if let Err(err) = voice.deafen(true).await {
-        let message = format!("Failed: {:?}", err);
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
-        return Ok(());
+        tracing::error!("Failed self deafening: {err}");
     }
 
     Ok(())
