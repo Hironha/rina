@@ -13,7 +13,6 @@ use serenity::model::channel::Message;
 use serenity::model::error::Error as ModelError;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
-use serenity::{async_trait, Error as SerenityError};
 use songbird::input::{Input, YoutubeDl};
 use songbird::tracks::{Queued, Track, TrackHandle};
 use songbird::SerenityInit;
@@ -36,7 +35,7 @@ impl TypeMapKey for TrackTitleKey {
 
 struct Handler;
 
-#[async_trait]
+#[serenity::async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         Command::set_global_commands(&ctx.http, Vec::new())
@@ -312,8 +311,13 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
 async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let guild_id = msg.guild_id.expect("Expected guild_id to be defined");
     let Ok(music) = args.single::<String>() else {
-        let message = "Must provide a music name ou URL as argument";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!play")
+            .description("Missing music or URL argument");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
@@ -338,8 +342,13 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             Ok(metadata) => metadata,
             Err(err) => {
                 tracing::error!("Failed quering playlist metadata: {err}");
-                let message = "Could not get playlist information";
-                check_msg(msg.reply(ctx, message).await);
+                let error = CreateEmbed::new()
+                    .color(ERROR_COLOR)
+                    .title("!play")
+                    .description("Could not load track from playlist");
+
+                let message = CreateMessage::new().add_embed(error);
+                check_msg(msg.channel_id.send_message(&ctx.http, message).await);
                 return Ok(());
             }
         };
@@ -354,8 +363,13 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             typemap.insert::<TrackTitleKey>(metadata.title)
         }
 
-        let message = format!("{playlist_len} tracks added to the queue");
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        let embed = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!play")
+            .description(format!("{playlist_len} tracks added to the queue"));
+
+        let message = CreateMessage::new().add_embed(embed);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
@@ -603,7 +617,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
     }
 
     if let Err(err) = msg.channel_id.say(&ctx.http, message).await {
-        let message = if let SerenityError::Model(ModelError::MessageTooLong(_)) = err {
+        let message = if let serenity::Error::Model(ModelError::MessageTooLong(_)) = err {
             String::from("Too many tracks to list. Use `!head` to see the tracks at the top")
         } else {
             tracing::error!("Failed sending message: {err:?}");
