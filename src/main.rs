@@ -138,7 +138,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     let Some(connect_to) = author_channel_id else {
         let error = CreateEmbed::new()
             .color(ERROR_COLOR)
-            .title("Error")
+            .title("!join")
             .description("User not in a voice channel");
 
         let message = CreateMessage::new().add_embed(error);
@@ -153,7 +153,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     if manager.get(guild_id).is_some() {
         let error = CreateEmbed::new()
             .color(ERROR_COLOR)
-            .title("Error")
+            .title("!join")
             .description("I'm already in another voice channel");
 
         let message = CreateMessage::new().add_embed(error);
@@ -165,7 +165,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         let description = format!("Could not join the voice channel {}", connect_to.mention());
         let error = CreateEmbed::new()
             .color(ERROR_COLOR)
-            .title("Error")
+            .title("!join")
             .description(description);
 
         let message = CreateMessage::new().add_embed(error);
@@ -175,7 +175,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 
     let embed = CreateEmbed::new()
         .color(DEFAULT_COLOR)
-        .title("Join")
+        .title("!join")
         .description(format!("Joined {}", connect_to.mention()));
 
     let message = CreateMessage::new().add_embed(embed);
@@ -207,28 +207,39 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        check_msg(msg.reply(ctx, "Not in a voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!leave")
+            .description("User not in a voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
     let voice_channel_id = voice_lock.lock().await.current_channel();
     if author_channel_id.map(songbird::id::ChannelId::from) != voice_channel_id {
-        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!leave")
+            .description("User not in the same voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
     if let Err(err) = manager.remove(guild_id).await {
         tracing::error!("Failed leaving voice channel: {err:?}");
-        let message = "Could not leave voice channel";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!leave")
+            .description("Failed leaving voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
-
-    let message = author_channel_id
-        .map(|channel| format!("Left voice channel {}", channel.mention()))
-        .unwrap_or_else(|| String::from("Left voice channel"));
-
-    check_msg(msg.channel_id.say(&ctx.http, message).await);
 
     Ok(())
 }
