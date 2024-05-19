@@ -574,23 +574,41 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        check_msg(msg.reply(ctx, "Not in a voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!unmute")
+            .description("User not in a voice channel");
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
     let mut voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!unmute")
+            .description("User not in the same voice channel");
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
-    if let Err(err) = voice.mute(false).await {
-        let message = format!("Failed: {:?}", err);
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+    let embed = if let Err(err) = voice.mute(false).await {
+        tracing::error!("Failed self unmuting: {err}");
+        CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!unmute")
+            .description("Could not unmute myself")
     } else {
-        check_msg(msg.channel_id.say(&ctx.http, "Unmuted").await);
-    }
+        CreateEmbed::new()
+            .color(DEFAULT_COLOR)
+            .title("!unmute")
+            .description("I'm now unmuted. Use `!mute` to mute me")
+    };
 
+    let message = CreateMessage::new().add_embed(embed);
+    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
     Ok(())
 }
 
