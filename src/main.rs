@@ -262,25 +262,48 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        check_msg(msg.reply(ctx, "Not in a voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!mute")
+            .description("User not in a voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
     let mut voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!mute")
+            .description("User not in the same voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
-    if voice.is_mute() {
-        check_msg(msg.channel_id.say(&ctx.http, "Already muted").await);
-    } else if let Err(e) = voice.mute(true).await {
-        let message = format!("Failed: {:?}", e);
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+    let embed = if voice.is_mute() {
+        CreateEmbed::new()
+            .color(DEFAULT_COLOR)
+            .title("!mute")
+            .description("I'm already muted. Use `!unmute` to unmute me")
+    } else if let Err(err) = voice.mute(true).await {
+        tracing::error!("Failed self muting: {err}");
+        CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!mute")
+            .description("Could not mute myself")
     } else {
-        check_msg(msg.channel_id.say(&ctx.http, "Now muted").await);
-    }
+        CreateEmbed::new()
+            .color(DEFAULT_COLOR)
+            .title("!mute")
+            .description("I'm now muted. Use `!unmute` to unmute me")
+    };
 
+    let message = CreateMessage::new().add_embed(embed);
+    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
     Ok(())
 }
 
