@@ -137,6 +137,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!join")
             .description("User not in a voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -151,6 +152,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!join")
             .description("I'm already in another voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(ctx, message).await);
         return Ok(());
@@ -162,6 +164,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!join")
             .description(description);
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -171,6 +174,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         .color(DEFAULT_COLOR)
         .title("!join")
         .description(format!("Joined {}", connect_to.mention()));
+
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
 
@@ -204,6 +208,7 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!leave")
             .description("User not in a voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -215,6 +220,7 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!leave")
             .description("User not in the same voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -226,6 +232,7 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!leave")
             .description("Failed leaving voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -256,6 +263,7 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!mute")
             .description("User not in a voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -267,6 +275,7 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!mute")
             .description("User not in the same voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -304,6 +313,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!play")
             .description("Missing music or URL argument");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -339,6 +349,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 return Ok(());
             }
         };
+
         let playlist_len = playlist_metadata.len();
         let mut voice = voice_lock.lock().await;
         let http_client = get_http_client(ctx).await;
@@ -354,6 +365,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!play")
             .description(format!("{playlist_len} tracks added to the queue"));
+
         let message = CreateMessage::new().add_embed(embed);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -397,6 +409,7 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!skip")
             .description("User not in a voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -408,17 +421,18 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!skip")
             .description("User not in the same voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
-    let queue = voice.queue();
-    if queue.is_empty() {
+    if voice.queue().is_empty() {
         let error = CreateEmbed::new()
             .color(ERROR_COLOR)
             .title("!skip")
             .description("Queue is already empty. No tracks to skip");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -434,6 +448,7 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 .color(ERROR_COLOR)
                 .title("!skip")
                 .description("Cannot skip more than 20 tracks at once");
+
             let message = CreateMessage::new().add_embed(error);
             check_msg(msg.channel_id.send_message(&ctx.http, message).await);
             return Ok(());
@@ -444,19 +459,21 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 .color(ERROR_COLOR)
                 .title("!skip")
                 .description("Amount of tracks to skip must be a positive integer");
+
             let message = CreateMessage::new().add_embed(error);
             check_msg(msg.channel_id.send_message(&ctx.http, message).await);
             return Ok(());
         }
     };
 
-    let current_track = queue.current();
-    if let Err(err) = queue.skip() {
+    let current_track = voice.queue().current();
+    if let Err(err) = voice.queue().skip() {
         tracing::error!("Failed skipping current track: {err}");
         let error = CreateEmbed::new()
             .color(ERROR_COLOR)
             .title("!skip")
             .description("Could not skip current track");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -487,8 +504,9 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut description = String::with_capacity((amount - 1) * 10);
     description.push_str("Skipped following tracks:\n");
 
-    let skipped_tracks = queue.modify_queue(|q| q.drain(0..amount - 1).collect::<Vec<Queued>>());
-    let total_skipped = skipped_tracks.len();
+    let skipped_tracks = voice
+        .queue()
+        .modify_queue(|q| q.drain(0..amount - 1).collect::<Vec<Queued>>());
 
     for (idx, track) in skipped_tracks.into_iter().enumerate() {
         let handle = track.handle();
@@ -496,18 +514,15 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         let title = typemap
             .get::<TrackTitleKey>()
             .expect("Track title guaranteed to exists in typemap");
-        let label = match idx {
-            idx if idx == total_skipped - 1 => format!("{idx}. {title}"),
-            idx => format!("{idx}. {title}\n"),
-        };
 
-        description.push_str(&label);
+        description.push_str(&format!("{idx}. {title}\n"));
     }
 
     let embed = CreateEmbed::new()
         .color(DEFAULT_COLOR)
         .title("!skip")
         .description(description);
+
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
     Ok(())
@@ -535,6 +550,7 @@ async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!stop")
             .description("User not in a voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -546,6 +562,7 @@ async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!stop")
             .description("User not in the same voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -577,6 +594,7 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!unmute")
             .description("User not in a voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -588,6 +606,7 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!unmute")
             .description("User not in the same voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -633,6 +652,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!queue")
             .description("User not in a voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -644,6 +664,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
             .color(ERROR_COLOR)
             .title("!queue")
             .description("User not in the same voice channel");
+
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -662,6 +683,7 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
             .color(DEFAULT_COLOR)
             .title("!queue")
             .description("Queue is curently empty");
+
         let message = CreateMessage::new().add_embed(embed);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -709,19 +731,36 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        check_msg(msg.reply(&ctx.http, "Not in a voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!now")
+            .description("User not in a voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
     let voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!now")
+            .description("User not in the same voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
     let Some(track_handle) = voice.queue().current() else {
-        let message = "Not playing any track";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        let error = CreateEmbed::new()
+            .color(DEFAULT_COLOR)
+            .title("!now")
+            .description("Not currently playing any tracks");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
@@ -730,8 +769,15 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
         .get::<TrackTitleKey>()
         .expect("Track title expected to be defined");
 
-    let message = format!("Now playing {title}");
-    check_msg(msg.channel_id.say(&ctx.http, message).await);
+    let description = format!("Now playing {title}");
+
+    let embed = CreateEmbed::new()
+        .color(ERROR_COLOR)
+        .title("!now")
+        .description(description);
+
+    let message = CreateMessage::new().add_embed(embed);
+    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
     Ok(())
 }
 
