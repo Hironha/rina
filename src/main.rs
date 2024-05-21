@@ -10,7 +10,6 @@ use serenity::framework::standard::{Args, CommandResult, Configuration};
 use serenity::framework::StandardFramework;
 use serenity::model::application::Command;
 use serenity::model::channel::Message;
-use serenity::model::error::Error as ModelError;
 use serenity::model::gateway::Ready;
 use serenity::prelude::{GatewayIntents, Mentionable, TypeMapKey};
 use songbird::input::{Input, YoutubeDl};
@@ -630,50 +629,64 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        check_msg(msg.reply(&ctx.http, "Not in a voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!queue")
+            .description("User not in a voice channel");
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
     let voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!queue")
+            .description("User not in the same voice channel");
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
-    let tracks = voice.queue().current_queue();
+    let tracks = if voice.queue().current().is_some() {
+        let mut tracks = voice.queue().current_queue();
+        tracks.pop();
+        tracks
+    } else {
+        voice.queue().current_queue()
+    };
+
     if tracks.is_empty() {
-        let message = "Queue is currently empty";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        let embed = CreateEmbed::new()
+            .color(DEFAULT_COLOR)
+            .title("!queue")
+            .description("Queue is curently empty");
+        let message = CreateMessage::new().add_embed(embed);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
-    let mut message = String::with_capacity(tracks.len() * 10);
-    for (idx, handle) in tracks.iter().enumerate() {
+    let len = tracks.len().max(50);
+    let mut description = String::with_capacity(len * 10);
+    description.push_str(&format!("Total tracks in queue: {}\n\n", tracks.len()));
+
+    for (idx, handle) in tracks.iter().take(len).enumerate() {
         let typemap = handle.typemap().read().await;
         let title = typemap
             .get::<TrackTitleKey>()
-            .cloned()
-            .expect("Track title guaranteed to exists in typemap");
+            .expect("Track title guaranteed to exist in typemap");
 
-        let label = match idx {
-            0 => format!("Now playing: {title}\n"),
-            i if i == tracks.len() - 1 => format!("{i}. {title}"),
-            i => format!("{i}. {title}\n"),
-        };
-
-        message.push_str(&label);
+        description.push_str(&format!("{idx}. {title}\n"));
     }
 
-    if let Err(err) = msg.channel_id.say(&ctx.http, message).await {
-        let message = if let serenity::Error::Model(ModelError::MessageTooLong(_)) = err {
-            String::from("Too many tracks to list. Use `!head` to see the tracks at the top")
-        } else {
-            tracing::error!("Failed sending message: {err:?}");
-            String::from("Could not send the message listing the tracks")
-        };
+    let embed = CreateEmbed::new()
+        .color(DEFAULT_COLOR)
+        .title("!queue")
+        .description(description);
 
-        check_msg(msg.channel_id.say(&ctx.http, message).await)
-    }
+    let message = CreateMessage::new().embed(embed);
+    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
 
     Ok(())
 }
