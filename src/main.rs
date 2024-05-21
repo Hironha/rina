@@ -772,7 +772,7 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
     let description = format!("Now playing {title}");
 
     let embed = CreateEmbed::new()
-        .color(ERROR_COLOR)
+        .color(DEFAULT_COLOR)
         .title("!now")
         .description(description);
 
@@ -799,42 +799,68 @@ async fn head(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        check_msg(msg.reply(&ctx.http, "Not in a voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!head")
+            .description("User not in a voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
     let voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        check_msg(msg.reply(ctx, "Not in same voice channel").await);
+        let error = CreateEmbed::new()
+            .color(ERROR_COLOR)
+            .title("!head")
+            .description("User not in the same voice channel");
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
-    let tracks = voice.queue().current_queue();
+    let tracks = if voice.queue().current().is_some() {
+        let mut tracks = voice.queue().current_queue();
+        tracks.pop();
+        tracks
+    } else {
+        voice.queue().current_queue()
+    };
+
     if tracks.is_empty() {
-        let message = "Queue is currently empty";
-        check_msg(msg.channel_id.say(&ctx.http, message).await);
+        let embed = CreateEmbed::new()
+            .color(DEFAULT_COLOR)
+            .title("!head")
+            .description("Queue is currenly empty");
+
+        let message = CreateMessage::new().add_embed(embed);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
 
+    let tracks_len = tracks.len();
     let top_tracks = tracks.into_iter().take(20).collect::<Vec<TrackHandle>>();
-    let mut message = String::with_capacity(top_tracks.len() * 10);
+    let mut description = String::with_capacity(top_tracks.len() * 10);
+    description.push_str(&format!("Total tracks in queue: {}\n\n", tracks_len));
+
     for (idx, handle) in top_tracks.iter().enumerate() {
         let typemap = handle.typemap().read().await;
         let title = typemap
             .get::<TrackTitleKey>()
-            .cloned()
             .expect("Track title guaranteed to exists in typemap");
 
-        let label = match idx {
-            0 => format!("Now playing: {title}\n"),
-            i if i == top_tracks.len() - 1 => format!("{i}. {title}"),
-            i => format!("{i}. {title}\n"),
-        };
-
-        message.push_str(&label);
+        description.push_str(&format!("{idx}. {title}\n"));
     }
 
-    check_msg(msg.channel_id.say(&ctx.http, message).await);
+    let embed = CreateEmbed::new()
+        .color(DEFAULT_COLOR)
+        .title("!head")
+        .description(description);
+
+    let message = CreateMessage::new().add_embed(embed);
+    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
     Ok(())
 }
 
