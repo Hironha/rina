@@ -1,9 +1,10 @@
+mod embed;
 mod playlist;
 
 use std::env;
 
 use reqwest::Client as HttpClient;
-use serenity::all::{ChannelType, Color, CreateEmbed, CreateMessage, VoiceState};
+use serenity::all::{ChannelType, CreateMessage, VoiceState};
 use serenity::client::{Client, Context, EventHandler};
 use serenity::framework::standard::macros::{command, group};
 use serenity::framework::standard::{Args, CommandResult, Configuration};
@@ -16,8 +17,8 @@ use songbird::input::{Input, YoutubeDl};
 use songbird::tracks::{Queued, Track, TrackHandle};
 use songbird::SerenityInit;
 
-const ERROR_COLOR: Color = Color::RED;
-const DEFAULT_COLOR: Color = Color::ORANGE;
+use embed::EmbedBuilder;
+
 const HELP_MESSAGE: &str = include_str!("help.md");
 
 struct HttpKey;
@@ -133,10 +134,10 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     };
 
     let Some(connect_to) = author_channel_id else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!join")
-            .description("User not in a voice channel");
+            .description("User not in a voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -148,10 +149,10 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     if manager.get(guild_id).is_some() {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!join")
-            .description("I'm already in another voice channel");
+            .description("I'm already in another voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(ctx, message).await);
@@ -160,20 +161,20 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 
     let Ok(voice_lock) = manager.join(guild_id, connect_to).await else {
         let description = format!("Could not join the voice channel {}", connect_to.mention());
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!join")
-            .description(description);
+            .description(description)
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
 
-    let embed = CreateEmbed::new()
-        .color(DEFAULT_COLOR)
+    let embed = EmbedBuilder::new()
         .title("!join")
-        .description(format!("Joined {}", connect_to.mention()));
+        .description(format!("Joined {}", connect_to.mention()))
+        .build();
 
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -204,10 +205,10 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!leave")
-            .description("User not in a voice channel");
+            .description("User not in a voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -216,10 +217,10 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 
     let voice_channel_id = voice_lock.lock().await.current_channel();
     if author_channel_id.map(songbird::id::ChannelId::from) != voice_channel_id {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!leave")
-            .description("User not in the same voice channel");
+            .description("User not in the same voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -228,15 +229,27 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 
     if let Err(err) = manager.remove(guild_id).await {
         tracing::error!("Failed leaving voice channel: {err:?}");
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!leave")
-            .description("Failed leaving voice channel");
+            .description("Failed leaving voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     }
+
+    let voice_channel_mention = author_channel_id
+        .map(|id| id.mention())
+        .expect("Expected author channel id to be defined");
+
+    let embed = EmbedBuilder::new()
+        .title("!leave")
+        .description(format!("Left voice channel {voice_channel_mention}"))
+        .build();
+
+    let message = CreateMessage::new().add_embed(embed);
+    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
 
     Ok(())
 }
@@ -259,10 +272,10 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!mute")
-            .description("User not in a voice channel");
+            .description("User not in a voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -271,10 +284,10 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
 
     let mut voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!mute")
-            .description("User not in the same voice channel");
+            .description("User not in the same voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -282,22 +295,24 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
     }
 
     let embed = if voice.is_mute() {
-        CreateEmbed::new()
-            .color(DEFAULT_COLOR)
+        EmbedBuilder::new()
             .title("!mute")
             .description("I'm already muted. Use `!unmute` to unmute me")
+            .build()
     } else if let Err(err) = voice.mute(true).await {
         tracing::error!("Failed self muting: {err}");
-        CreateEmbed::new()
-            .color(ERROR_COLOR)
+
+        EmbedBuilder::error()
             .title("!mute")
             .description("Could not mute myself")
+            .build()
     } else {
-        CreateEmbed::new()
-            .color(DEFAULT_COLOR)
+        EmbedBuilder::new()
             .title("!mute")
             .description("I'm now muted. Use `!unmute` to unmute me")
+            .build()
     };
+
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
     Ok(())
@@ -309,10 +324,10 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
 async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let guild_id = msg.guild_id.expect("Expected guild_id to be defined");
     let Ok(music) = args.single::<String>() else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!play")
-            .description("Missing music or URL argument");
+            .description("Missing music or URL argument")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -340,10 +355,12 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             Ok(metadata) => metadata,
             Err(err) => {
                 tracing::error!("Failed quering playlist metadata: {err}");
-                let error = CreateEmbed::new()
-                    .color(ERROR_COLOR)
+
+                let error = EmbedBuilder::error()
                     .title("!play")
-                    .description("Could not load track from playlist");
+                    .description("Could not load track from playlist")
+                    .build();
+
                 let message = CreateMessage::new().add_embed(error);
                 check_msg(msg.channel_id.send_message(&ctx.http, message).await);
                 return Ok(());
@@ -361,10 +378,10 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             typemap.insert::<TrackTitleKey>(metadata.title)
         }
 
-        let embed = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let embed = EmbedBuilder::new()
             .title("!play")
-            .description(format!("{playlist_len} tracks added to the queue"));
+            .description(format!("{playlist_len} tracks added to the queue"))
+            .build();
 
         let message = CreateMessage::new().add_embed(embed);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -405,10 +422,10 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!skip")
-            .description("User not in a voice channel");
+            .description("User not in a voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -417,10 +434,10 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!skip")
-            .description("User not in the same voice channel");
+            .description("User not in the same voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -428,10 +445,10 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     }
 
     if voice.queue().is_empty() {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!skip")
-            .description("Queue is already empty. No tracks to skip");
+            .description("Queue is already empty. No tracks to skip")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -444,10 +461,10 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .parse::<usize>()
     {
         Ok(amount) if amount > 20 => {
-            let error = CreateEmbed::new()
-                .color(ERROR_COLOR)
+            let error = EmbedBuilder::error()
                 .title("!skip")
-                .description("Cannot skip more than 20 tracks at once");
+                .description("Cannot skip more than 20 tracks at once")
+                .build();
 
             let message = CreateMessage::new().add_embed(error);
             check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -455,10 +472,10 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         }
         Ok(amount) => amount,
         Err(_) => {
-            let error = CreateEmbed::new()
-                .color(ERROR_COLOR)
+            let error = EmbedBuilder::error()
                 .title("!skip")
-                .description("Amount of tracks to skip must be a positive integer");
+                .description("Amount of tracks to skip must be a positive integer")
+                .build();
 
             let message = CreateMessage::new().add_embed(error);
             check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -469,10 +486,11 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let current_track = voice.queue().current();
     if let Err(err) = voice.queue().skip() {
         tracing::error!("Failed skipping current track: {err}");
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+
+        let error = EmbedBuilder::error()
             .title("!skip")
-            .description("Could not skip current track");
+            .description("Could not skip current track")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -480,22 +498,23 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     }
 
     if amount == 1 {
-        let embed = match current_track {
+        let description = match current_track {
             Some(track) => {
                 let typemap = track.typemap().read().await;
                 let title = typemap
                     .get::<TrackTitleKey>()
                     .expect("Expected track title in typemap");
-                CreateEmbed::new()
-                    .color(DEFAULT_COLOR)
-                    .title("!skip")
-                    .description(format!("Current track {title} skipped"))
+
+                format!("Current track {title} skipped")
             }
-            None => CreateEmbed::new()
-                .color(DEFAULT_COLOR)
-                .title("!skip")
-                .description("Current track skipped"),
+            None => String::from("Current track skipped"),
         };
+
+        let embed = EmbedBuilder::new()
+            .title("!skip")
+            .description(description)
+            .build();
+
         let message = CreateMessage::new().add_embed(embed);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
@@ -518,10 +537,10 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         description.push_str(&format!("{idx}. {title}\n"));
     }
 
-    let embed = CreateEmbed::new()
-        .color(DEFAULT_COLOR)
+    let embed = EmbedBuilder::new()
         .title("!skip")
-        .description(description);
+        .description(description)
+        .build();
 
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -546,10 +565,10 @@ async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!stop")
-            .description("User not in a voice channel");
+            .description("User not in a voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -558,10 +577,10 @@ async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
 
     let voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!stop")
-            .description("User not in the same voice channel");
+            .description("User not in the same voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -590,10 +609,10 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!unmute")
-            .description("User not in a voice channel");
+            .description("User not in a voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -602,10 +621,10 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
 
     let mut voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!unmute")
-            .description("User not in the same voice channel");
+            .description("User not in the same voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -614,15 +633,16 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
 
     let embed = if let Err(err) = voice.mute(false).await {
         tracing::error!("Failed self unmuting: {err}");
-        CreateEmbed::new()
-            .color(ERROR_COLOR)
+
+        EmbedBuilder::error()
             .title("!unmute")
             .description("Could not unmute myself")
+            .build()
     } else {
-        CreateEmbed::new()
-            .color(DEFAULT_COLOR)
+        EmbedBuilder::new()
             .title("!unmute")
             .description("I'm now unmuted. Use `!mute` to mute me")
+            .build()
     };
 
     let message = CreateMessage::new().add_embed(embed);
@@ -648,10 +668,10 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!queue")
-            .description("User not in a voice channel");
+            .description("User not in a voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -660,10 +680,10 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
 
     let voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!queue")
-            .description("User not in the same voice channel");
+            .description("User not in the same voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -679,10 +699,10 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
     };
 
     if tracks.is_empty() {
-        let embed = CreateEmbed::new()
-            .color(DEFAULT_COLOR)
+        let embed = EmbedBuilder::new()
             .title("!queue")
-            .description("Queue is curently empty");
+            .description("Queue is curently empty")
+            .build();
 
         let message = CreateMessage::new().add_embed(embed);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -702,10 +722,10 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
         description.push_str(&format!("{idx}. {title}\n"));
     }
 
-    let embed = CreateEmbed::new()
-        .color(DEFAULT_COLOR)
+    let embed = EmbedBuilder::new()
         .title("!queue")
-        .description(description);
+        .description(description)
+        .build();
 
     let message = CreateMessage::new().embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -731,10 +751,10 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!now")
-            .description("User not in a voice channel");
+            .description("User not in a voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -743,10 +763,10 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
 
     let voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!now")
-            .description("User not in the same voice channel");
+            .description("User not in the same voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -754,12 +774,12 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
     }
 
     let Some(track_handle) = voice.queue().current() else {
-        let error = CreateEmbed::new()
-            .color(DEFAULT_COLOR)
+        let embed = EmbedBuilder::new()
             .title("!now")
-            .description("Not currently playing any tracks");
+            .description("Not currently playing a track")
+            .build();
 
-        let message = CreateMessage::new().add_embed(error);
+        let message = CreateMessage::new().add_embed(embed);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
         return Ok(());
     };
@@ -769,12 +789,10 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
         .get::<TrackTitleKey>()
         .expect("Track title expected to be defined");
 
-    let description = format!("Now playing {title}");
-
-    let embed = CreateEmbed::new()
-        .color(DEFAULT_COLOR)
+    let embed = EmbedBuilder::new()
         .title("!now")
-        .description(description);
+        .description(format!("Now playing {title}"))
+        .build();
 
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -799,10 +817,10 @@ async fn head(ctx: &Context, msg: &Message) -> CommandResult {
         .expect("Expected songbird in context");
 
     let Some(voice_lock) = manager.get(guild_id) else {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!head")
-            .description("User not in a voice channel");
+            .description("User not in a voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -811,10 +829,10 @@ async fn head(ctx: &Context, msg: &Message) -> CommandResult {
 
     let voice = voice_lock.lock().await;
     if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        let error = CreateEmbed::new()
-            .color(ERROR_COLOR)
+        let error = EmbedBuilder::error()
             .title("!head")
-            .description("User not in the same voice channel");
+            .description("User not in the same voice channel")
+            .build();
 
         let message = CreateMessage::new().add_embed(error);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -830,10 +848,10 @@ async fn head(ctx: &Context, msg: &Message) -> CommandResult {
     };
 
     if tracks.is_empty() {
-        let embed = CreateEmbed::new()
-            .color(DEFAULT_COLOR)
+        let embed = EmbedBuilder::new()
             .title("!head")
-            .description("Queue is currenly empty");
+            .description("Queue is currenly empty")
+            .build();
 
         let message = CreateMessage::new().add_embed(embed);
         check_msg(msg.channel_id.send_message(&ctx.http, message).await);
@@ -854,10 +872,10 @@ async fn head(ctx: &Context, msg: &Message) -> CommandResult {
         description.push_str(&format!("{idx}. {title}\n"));
     }
 
-    let embed = CreateEmbed::new()
-        .color(DEFAULT_COLOR)
+    let embed = EmbedBuilder::new()
         .title("!head")
-        .description(description);
+        .description(description)
+        .build();
 
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
