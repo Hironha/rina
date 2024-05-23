@@ -1,7 +1,7 @@
 use serenity::all::{Color, CreateEmbed, CreateEmbedAuthor, Timestamp};
 
 const AUTHOR_NAME: &str = "Nina";
-const AVATAR_IMG_URL: &str = "https://github.com/hironha/rina/static/images/nina.jpg";
+const AVATAR_IMG_URL: &str = "https://raw.githubusercontent.com/Hironha/rina/main/static/images/nina.jpg";
 
 #[derive(Clone, Debug)]
 pub struct EmbedBuilder(CreateEmbed);
