@@ -320,9 +320,28 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
-// TODO: validate if msg author is in the same voice channel as nina
 async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let guild_id = msg.guild_id.expect("Expected guild_id to be defined");
+    let (guild_id, author_channel_id) = {
+        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
+        let channel_id = guild
+            .voice_states
+            .get(&msg.author.id)
+            .and_then(|vs| vs.channel_id);
+
+        (guild.id, channel_id)
+    };
+
+    let Some(connect_to) = author_channel_id else {
+        let error = EmbedBuilder::error()
+            .title("!play")
+            .description("User not in a voice channel")
+            .build();
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
+        return Ok(());
+    };
+
     let Ok(music) = args.single::<String>() else {
         let error = EmbedBuilder::error()
             .title("!play")
@@ -340,14 +359,36 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let voice_lock = if let Some(voice_lock) = manager.get(guild_id) {
         voice_lock
-    } else if join(ctx, msg, args).await.is_ok() {
-        manager
-            .get(guild_id)
-            .expect("Expected voice lock after joining voice channel")
     } else {
-        tracing::error!("Failed joining voice channel to play music");
-        return Ok(());
+        match manager.join(guild_id, connect_to).await {
+            Ok(voice_lock) => voice_lock,
+            Err(err) => {
+                tracing::error!("Failed joining voice channel to play music: {err}");
+
+                let description = format!("Could not join voice channel {}", connect_to.mention());
+                let error = EmbedBuilder::error()
+                    .title("!play")
+                    .description(description)
+                    .build();
+
+                let message = CreateMessage::new().add_embed(error);
+                check_msg(msg.channel_id.send_message(&ctx.http, message).await);
+                return Ok(());
+            }
+        }
     };
+
+    let current_channel = voice_lock.lock().await.current_channel();
+    if author_channel_id.map(songbird::id::ChannelId::from) != current_channel {
+        let error = EmbedBuilder::error()
+            .title("!play")
+            .description("User not in the same voice channel")
+            .build();
+
+        let message = CreateMessage::new().add_embed(error);
+        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
+        return Ok(());
+    }
 
     // FIXME: only works for youtube playlists, and it doesn't cover all cases
     if music.starts_with("http") && music.contains("&list=") {
@@ -368,8 +409,8 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         };
 
         let playlist_len = playlist_metadata.len();
-        let mut voice = voice_lock.lock().await;
         let http_client = get_http_client(ctx).await;
+        let mut voice = voice_lock.lock().await;
 
         for metadata in playlist_metadata.into_iter() {
             let src = YoutubeDl::new(http_client.clone(), metadata.url);
@@ -395,8 +436,11 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     };
 
     let metadata = src.aux_metadata().await?;
-    let mut voice = voice_lock.lock().await;
-    let track_handle = voice.enqueue_with_preload(Track::from(src), None);
+    let track_handle = voice_lock
+        .lock()
+        .await
+        .enqueue_with_preload(Track::from(src), None);
+
     let mut typemap = track_handle.typemap().write().await;
     let title = metadata.title.unwrap_or_else(|| String::from("Unknown"));
     typemap.insert::<TrackTitleKey>(title);
