@@ -18,9 +18,7 @@ use songbird::input::{Input, YoutubeDl};
 use songbird::tracks::{Queued, Track, TrackHandle};
 use songbird::SerenityInit;
 
-use embed::EmbedBuilder;
-
-const HELP_MESSAGE: &str = include_str!("help.md");
+use embed::{EmbedBuilder, EmbedField};
 
 struct HttpKey;
 
@@ -316,6 +314,7 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
 
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
+
     Ok(())
 }
 
@@ -583,6 +582,7 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
+
     Ok(())
 }
 
@@ -627,6 +627,7 @@ async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
     }
 
     voice.queue().stop();
+
     Ok(())
 }
 
@@ -686,6 +687,7 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
 
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
+
     Ok(())
 }
 
@@ -827,13 +829,33 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
 
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
+
     Ok(())
 }
 
 #[command]
 #[only_in(guilds)]
 async fn help(ctx: &Context, msg: &Message) -> CommandResult {
-    check_msg(msg.reply(ctx, HELP_MESSAGE).await);
+    let fields = vec![
+        EmbedField::new("!help", "Explains all available commands"),
+        EmbedField::new("!join", "Call **Nina** to join your current voice channel"),
+        EmbedField::new("!mute", "Mutes **Nina**. Beware, if playing a track, no sound will come out. See **!unmute** to unmute **Nina**"),
+        EmbedField::new("!play", "Play or enqueue a track. Must provide the track name or source **URL**"),
+        EmbedField::new("!skip", "Skip track. Accepts an optional parameter to define amount of tracks to skip (max of 20)"),
+        EmbedField::new("!stop", "Stop **Nina** if playing a track and clears all enqueued tracks"),
+        EmbedField::new("!unmute", "Unmute **Nina**. See **!mute** to mute **Nina**"),
+        EmbedField::new("!queue", "List first 50 enqueued tracks. There is currently no way to list all enqueue tracks"),
+        EmbedField::new("!now", "Show playing track title"),
+    ];
+
+    let embed = EmbedBuilder::new()
+        .title("!help")
+        .description("Available commands")
+        .fields(fields)
+        .build();
+
+    let message = CreateMessage::new().embed(embed);
+    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
 
     Ok(())
 }

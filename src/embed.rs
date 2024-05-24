@@ -27,16 +27,13 @@ impl EmbedBuilder {
         Self(embed.description(description))
     }
 
-    pub fn field(self, field: Field) -> Self {
+    pub fn field(self, field: EmbedField) -> Self {
         let embed = self.0;
         Self(embed.field(field.name, field.value, field.inline))
     }
 
-    pub fn fields(self, fields: &[Field]) -> Self {
-        let fields = fields
-            .iter()
-            .map(|f| (f.name.as_str(), f.value.as_str(), f.inline));
-
+    pub fn fields(self, fields: impl IntoIterator<Item = EmbedField>) -> Self {
+        let fields = fields.into_iter().map(|f| (f.name, f.value, f.inline));
         Self(self.0.fields(fields))
     }
 
@@ -57,13 +54,13 @@ impl Default for EmbedBuilder {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Field {
+pub struct EmbedField {
     name: String,
     value: String,
     inline: bool,
 }
 
-impl Field {
+impl EmbedField {
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             name: name.into(),
