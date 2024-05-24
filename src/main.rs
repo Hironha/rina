@@ -819,11 +819,7 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     };
 
-    let typemap = track_handle.typemap().read().await;
-    let title = typemap
-        .get::<TrackTitleKey>()
-        .expect("Track title expected to be defined");
-
+    let title = get_track_title(&track_handle).await;
     let embed = EmbedBuilder::new()
         .title("!now")
         .description(format!("Now playing {title}"))
