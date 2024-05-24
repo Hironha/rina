@@ -2,6 +2,7 @@ mod embed;
 mod playlist;
 
 use std::env;
+use std::sync::Arc;
 
 use reqwest::Client as HttpClient;
 use serenity::all::{ChannelType, CreateMessage, VoiceState};
@@ -30,7 +31,7 @@ impl TypeMapKey for HttpKey {
 struct TrackTitleKey;
 
 impl TypeMapKey for TrackTitleKey {
-    type Value = String;
+    type Value = Arc<str>;
 }
 
 struct Handler;
@@ -88,7 +89,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(help, join, leave, mute, play, skip, stop, unmute, queue, now, head)]
+#[commands(help, join, leave, mute, play, skip, stop, unmute, queue, now)]
 struct General;
 
 #[tokio::main]
@@ -410,14 +411,16 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
         let playlist_len = playlist_metadata.len();
         let http_client = get_http_client(ctx).await;
-        let mut voice = voice_lock.lock().await;
 
+        let mut voice = voice_lock.lock().await;
         for metadata in playlist_metadata.into_iter() {
             let src = YoutubeDl::new(http_client.clone(), metadata.url);
             let track_handle = voice.enqueue_with_preload(Track::from(src), None);
             let mut typemap = track_handle.typemap().write().await;
-            typemap.insert::<TrackTitleKey>(metadata.title)
+            typemap.insert::<TrackTitleKey>(metadata.title.into())
         }
+
+        std::mem::drop(voice);
 
         let embed = EmbedBuilder::new()
             .title("!play")
@@ -442,7 +445,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .enqueue_with_preload(Track::from(src), None);
 
     let mut typemap = track_handle.typemap().write().await;
-    let title = metadata.title.unwrap_or_else(|| String::from("Unknown"));
+    let title: Arc<str> = metadata.title.unwrap_or_else(|| "Unknown".into()).into();
     typemap.insert::<TrackTitleKey>(title);
 
     Ok(())
@@ -544,11 +547,7 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     if amount == 1 {
         let description = match current_track {
             Some(track) => {
-                let typemap = track.typemap().read().await;
-                let title = typemap
-                    .get::<TrackTitleKey>()
-                    .expect("Expected track title in typemap");
-
+                let title = get_track_title(&track).await;
                 format!("Current track {title} skipped")
             }
             None => String::from("Current track skipped"),
@@ -572,11 +571,7 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .modify_queue(|q| q.drain(0..amount - 1).collect::<Vec<Queued>>());
 
     for (idx, track) in skipped_tracks.into_iter().enumerate() {
-        let handle = track.handle();
-        let typemap = handle.typemap().read().await;
-        let title = typemap
-            .get::<TrackTitleKey>()
-            .expect("Track title guaranteed to exists in typemap");
+        let title = get_track_title(&track.handle()).await;
 
         description.push_str(&format!("{idx}. {title}\n"));
     }
@@ -722,8 +717,8 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     };
 
-    let voice = voice_lock.lock().await;
-    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+    let current_channel = voice_lock.lock().await.current_channel();
+    if author_channel_id.map(songbird::id::ChannelId::from) != current_channel {
         let error = EmbedBuilder::error()
             .title("!queue")
             .description("User not in the same voice channel")
@@ -734,34 +729,30 @@ async fn queue(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     }
 
-    let tracks = if voice.queue().current().is_some() {
-        let mut tracks = voice.queue().current_queue();
-        tracks.pop();
-        tracks
-    } else {
-        voice.queue().current_queue()
+    let mut tracks = voice_lock.lock().await.queue().current_queue();
+    let current_track_title = match tracks.pop() {
+        Some(track) => get_track_title(&track).await,
+        None => {
+            let embed = EmbedBuilder::new()
+                .title("!queue")
+                .description("Queue is curently empty")
+                .build();
+
+            let message = CreateMessage::new().add_embed(embed);
+            check_msg(msg.channel_id.send_message(&ctx.http, message).await);
+            return Ok(());
+        }
     };
 
-    if tracks.is_empty() {
-        let embed = EmbedBuilder::new()
-            .title("!queue")
-            .description("Queue is curently empty")
-            .build();
-
-        let message = CreateMessage::new().add_embed(embed);
-        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
-        return Ok(());
-    }
-
     let len = tracks.len().max(50);
-    let mut description = String::with_capacity(len * 10);
-    description.push_str(&format!("Total tracks in queue: {}\n\n", tracks.len()));
+    let mut description = format!(
+        "Now playing: **{current_track_title}**\n\nTotal tracks in queue: **{}**\n\n",
+        tracks.len()
+    );
+    description.reserve(len * 10);
 
     for (idx, handle) in tracks.iter().take(len).enumerate() {
-        let typemap = handle.typemap().read().await;
-        let title = typemap
-            .get::<TrackTitleKey>()
-            .expect("Track title guaranteed to exist in typemap");
+        let title = get_track_title(handle).await;
 
         description.push_str(&format!("{idx}. {title}\n"));
     }
@@ -845,89 +836,6 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
-async fn head(ctx: &Context, msg: &Message) -> CommandResult {
-    let (guild_id, author_channel_id) = {
-        let guild = msg.guild(&ctx.cache).expect("Expected guild to be defined");
-        let channel_id = guild
-            .voice_states
-            .get(&msg.author.id)
-            .and_then(|vs| vs.channel_id);
-
-        (guild.id, channel_id)
-    };
-
-    let manager = songbird::get(ctx)
-        .await
-        .expect("Expected songbird in context");
-
-    let Some(voice_lock) = manager.get(guild_id) else {
-        let error = EmbedBuilder::error()
-            .title("!head")
-            .description("User not in a voice channel")
-            .build();
-
-        let message = CreateMessage::new().add_embed(error);
-        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
-        return Ok(());
-    };
-
-    let voice = voice_lock.lock().await;
-    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
-        let error = EmbedBuilder::error()
-            .title("!head")
-            .description("User not in the same voice channel")
-            .build();
-
-        let message = CreateMessage::new().add_embed(error);
-        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
-        return Ok(());
-    }
-
-    let tracks = if voice.queue().current().is_some() {
-        let mut tracks = voice.queue().current_queue();
-        tracks.pop();
-        tracks
-    } else {
-        voice.queue().current_queue()
-    };
-
-    if tracks.is_empty() {
-        let embed = EmbedBuilder::new()
-            .title("!head")
-            .description("Queue is currenly empty")
-            .build();
-
-        let message = CreateMessage::new().add_embed(embed);
-        check_msg(msg.channel_id.send_message(&ctx.http, message).await);
-        return Ok(());
-    }
-
-    let tracks_len = tracks.len();
-    let top_tracks = tracks.into_iter().take(20).collect::<Vec<TrackHandle>>();
-    let mut description = String::with_capacity(top_tracks.len() * 10);
-    description.push_str(&format!("Total tracks in queue: {}\n\n", tracks_len));
-
-    for (idx, handle) in top_tracks.iter().enumerate() {
-        let typemap = handle.typemap().read().await;
-        let title = typemap
-            .get::<TrackTitleKey>()
-            .expect("Track title guaranteed to exists in typemap");
-
-        description.push_str(&format!("{idx}. {title}\n"));
-    }
-
-    let embed = EmbedBuilder::new()
-        .title("!head")
-        .description(description)
-        .build();
-
-    let message = CreateMessage::new().add_embed(embed);
-    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
-    Ok(())
-}
-
-#[command]
-#[only_in(guilds)]
 async fn help(ctx: &Context, msg: &Message) -> CommandResult {
     check_msg(msg.reply(ctx, HELP_MESSAGE).await);
 
@@ -940,6 +848,14 @@ async fn get_http_client(ctx: &Context) -> HttpClient {
         .get::<HttpKey>()
         .cloned()
         .expect("HttpKey guaranteed to exist in typemap")
+}
+
+async fn get_track_title(track: &TrackHandle) -> Arc<str> {
+    let typemap = track.typemap().read().await;
+    typemap
+        .get::<TrackTitleKey>()
+        .cloned()
+        .expect("Track title guaranteed to exists in typemap")
 }
 
 fn check_msg(result: serenity::Result<Message>) {
