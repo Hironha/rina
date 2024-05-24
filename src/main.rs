@@ -445,7 +445,16 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let mut typemap = track_handle.typemap().write().await;
     let title: Arc<str> = metadata.title.unwrap_or_else(|| "Unknown".into()).into();
+    let description = format!("Track {title} added to queue");
     typemap.insert::<TrackTitleKey>(title);
+
+    let embed = EmbedBuilder::new()
+        .title("!play")
+        .description(description)
+        .build();
+
+    let message = CreateMessage::new().embed(embed);
+    check_msg(msg.channel_id.send_message(&ctx.http, message).await);
 
     Ok(())
 }
