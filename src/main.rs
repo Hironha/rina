@@ -178,8 +178,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
     let message = CreateMessage::new().add_embed(embed);
     check_msg(msg.channel_id.send_message(&ctx.http, message).await);
 
-    let mut voice = voice_lock.lock().await;
-    if let Err(err) = voice.deafen(true).await {
+    if let Err(err) = voice_lock.lock().await.deafen(true).await {
         tracing::error!("Failed self deafening: {err}");
     }
 
@@ -281,8 +280,8 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     };
 
-    let mut voice = voice_lock.lock().await;
-    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+    let current_channel = voice_lock.lock().await.current_channel();
+    if author_channel_id.map(songbird::id::ChannelId::from) != current_channel {
         let error = EmbedBuilder::error()
             .title("!mute")
             .description("User not in the same voice channel")
@@ -293,12 +292,12 @@ async fn mute(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     }
 
-    let embed = if voice.is_mute() {
+    let embed = if voice_lock.lock().await.is_mute() {
         EmbedBuilder::new()
             .title("!mute")
             .description("I'm already muted. Use `!unmute` to unmute me")
             .build()
-    } else if let Err(err) = voice.mute(true).await {
+    } else if let Err(err) = voice_lock.lock().await.mute(true).await {
         tracing::error!("Failed self muting: {err}");
 
         EmbedBuilder::error()
@@ -487,8 +486,8 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         return Ok(());
     };
 
-    let voice = voice_lock.lock().await;
-    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+    let current_channel = voice_lock.lock().await.current_channel();
+    if author_channel_id.map(songbird::id::ChannelId::from) != current_channel {
         let error = EmbedBuilder::error()
             .title("!skip")
             .description("User not in the same voice channel")
@@ -499,7 +498,7 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         return Ok(());
     }
 
-    if voice.queue().is_empty() {
+    if voice_lock.lock().await.queue().is_empty() {
         let error = EmbedBuilder::error()
             .title("!skip")
             .description("Queue is already empty. No tracks to skip")
@@ -538,8 +537,7 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         }
     };
 
-    let current_track = voice.queue().current();
-    if let Err(err) = voice.queue().skip() {
+    if let Err(err) = voice_lock.lock().await.queue().skip() {
         tracing::error!("Failed skipping current track: {err}");
 
         let error = EmbedBuilder::error()
@@ -553,7 +551,7 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     }
 
     if amount == 1 {
-        let description = match current_track {
+        let description = match voice_lock.lock().await.queue().current() {
             Some(track) => {
                 let title = get_track_title(&track).await;
                 format!("Current track {title} skipped")
@@ -574,7 +572,9 @@ async fn skip(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let mut description = String::with_capacity((amount - 1) * 10);
     description.push_str("Skipped following tracks:\n");
 
-    let skipped_tracks = voice
+    let skipped_tracks = voice_lock
+        .lock()
+        .await
         .queue()
         .modify_queue(|q| q.drain(0..amount - 1).collect::<Vec<Queued>>());
 
@@ -623,8 +623,8 @@ async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         return Ok(());
     };
 
-    let voice = voice_lock.lock().await;
-    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+    let current_channel = voice_lock.lock().await.current_channel();
+    if author_channel_id.map(songbird::id::ChannelId::from) != current_channel {
         let error = EmbedBuilder::error()
             .title("!stop")
             .description("User not in the same voice channel")
@@ -635,7 +635,7 @@ async fn stop(ctx: &Context, msg: &Message, _args: Args) -> CommandResult {
         return Ok(());
     }
 
-    voice.queue().stop();
+    voice_lock.lock().await.queue().stop();
 
     Ok(())
 }
@@ -668,8 +668,8 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     };
 
-    let mut voice = voice_lock.lock().await;
-    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+    let current_channel = voice_lock.lock().await.current_channel();
+    if author_channel_id.map(songbird::id::ChannelId::from) != current_channel {
         let error = EmbedBuilder::error()
             .title("!unmute")
             .description("User not in the same voice channel")
@@ -680,7 +680,7 @@ async fn unmute(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     }
 
-    let embed = if let Err(err) = voice.mute(false).await {
+    let embed = if let Err(err) = voice_lock.lock().await.mute(false).await {
         tracing::error!("Failed self unmuting: {err}");
 
         EmbedBuilder::error()
@@ -807,8 +807,8 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     };
 
-    let voice = voice_lock.lock().await;
-    if author_channel_id.map(songbird::id::ChannelId::from) != voice.current_channel() {
+    let current_channel = voice_lock.lock().await.current_channel();
+    if author_channel_id.map(songbird::id::ChannelId::from) != current_channel {
         let error = EmbedBuilder::error()
             .title("!now")
             .description("User not in the same voice channel")
@@ -819,7 +819,7 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     }
 
-    let Some(track_handle) = voice.queue().current() else {
+    let Some(current_track) = voice_lock.lock().await.queue().current() else {
         let embed = EmbedBuilder::new()
             .title("!now")
             .description("Not currently playing a track")
@@ -830,7 +830,7 @@ async fn now(ctx: &Context, msg: &Message) -> CommandResult {
         return Ok(());
     };
 
-    let title = get_track_title(&track_handle).await;
+    let title = get_track_title(&current_track).await;
     let embed = EmbedBuilder::new()
         .title("!now")
         .description(format!("Now playing {title}"))
