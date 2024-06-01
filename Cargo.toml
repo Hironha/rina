@@ -12,15 +12,15 @@ lto = "thin"
 [dependencies]
 reqwest = "0.11"
 songbird = { version = "0.4.1", features = ["builtin-queue"] }
-symphonia = { version = "0.5.4", features = ["aac", "mpa", "isomp4", "alac"] }
+symphonia = { version = "0.5.4", features = ["all"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 tracing-futures = "0.2.5"
-serde = { version = "1.0.201", features = ["derive"] }
+serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.117"
 
 [dependencies.tokio]
-version = "1.37.0"
+version = "1.38.0"
 features = ["macros", "rt-multi-thread", "signal", "sync"]
 
 [dependencies.serenity]
